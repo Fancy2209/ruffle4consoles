@@ -8,6 +8,9 @@ use ruffle_core::{PlayerBuilder, ViewportDimensions};
 use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
 
+#[cfg(target_os = "horizon")]
+use sdl2::libc;
+
 #[cfg(target_os = "vita")]
 #[link(name = "SDL2", kind = "static")]
 #[link(name = "vitaGL", kind = "static")]

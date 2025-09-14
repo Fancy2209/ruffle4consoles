@@ -1,2 +1,2 @@
-[target.wasm32-nintendo-switch]
+[target.aarch64-nintendo-switch]
 rustflags = ['--cfg', 'getrandom_backend="rndr"']

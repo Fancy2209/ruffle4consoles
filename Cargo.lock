@@ -158,7 +158,7 @@ dependencies = [
 [[package]]
 name = "build_playerglobal"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 dependencies = [
  "clap",
  "convert_case",
@@ -790,7 +790,7 @@ dependencies = [
 [[package]]
 name = "flv-rs"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 dependencies = [
  "bitflags 2.9.4",
  "thiserror 2.0.16",
@@ -963,8 +963,7 @@ dependencies = [
 [[package]]
 name = "glow"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e5ea60d70410161c8bf5da3fdfeaa1c72ed2c15f8bbb9d19fe3a4fad085f08"
+source = "git+https://github.com/grovesNL/glow?branch=main#aa4238a60d17076b917eaa1ec662e5080df42b0a"
 dependencies = [
  "js-sys",
  "slotmap",
@@ -1500,7 +1499,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "pixel_bender"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 dependencies = [
  "byteorder",
  "num-derive",
@@ -1695,16 +1694,17 @@ name = "ruffle4vita"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "glow",
  "ruffle_core",
  "ruffle_render",
- "ruffle_render_gles",
+ "ruffle_render_glow",
  "sdl2",
 ]
 
 [[package]]
 name = "ruffle_core"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 dependencies = [
  "async-channel",
  "bitflags 2.9.4",
@@ -1764,7 +1764,7 @@ dependencies = [
 [[package]]
 name = "ruffle_macros"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1774,7 +1774,7 @@ dependencies = [
 [[package]]
 name = "ruffle_render"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 dependencies = [
  "byteorder",
  "enum-map",
@@ -1797,9 +1797,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "ruffle_render_gles"
+name = "ruffle_render_glow"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
 dependencies = [
  "bytemuck",
  "glow",
@@ -1808,13 +1807,12 @@ dependencies = [
  "sdl2",
  "swf",
  "thiserror 2.0.16",
- "wasm-bindgen",
 ]
 
 [[package]]
 name = "ruffle_video"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 dependencies = [
  "ruffle_render",
  "slotmap",
@@ -1825,7 +1823,7 @@ dependencies = [
 [[package]]
 name = "ruffle_wstr"
 version = "0.1.0"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 
 [[package]]
 name = "rustc-hash"
@@ -2030,7 +2028,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "swf"
 version = "0.2.2"
-source = "git+https://github.com/Fancy2209/ruffle?branch=psvita#2514c48ab1be0c118b771adb412cb5d5c223db20"
+source = "git+https://github.com/ruffle-rs/ruffle?branch=master#55f97c2ae4014f6a4620f71353eba90df2b85268"
 dependencies = [
  "bitflags 2.9.4",
  "bitstream-io",

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 sdl2 = { version = "0.38.0", features = ["static-link", "use-pkgconfig"] }
-ruffle_core = { git = "https://github.com/Fancy2209/ruffle", branch = "psvita", features = [
+ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", features = [
     "audio",
     "symphonia",
     "mp3",
@@ -14,13 +14,13 @@ ruffle_core = { git = "https://github.com/Fancy2209/ruffle", branch = "psvita", 
     "default_compatibility_rules",
     "default_font",
 ] }
-
-ruffle_render = { git = "https://github.com/Fancy2209/ruffle", branch = "psvita" }
-ruffle_render_gles = { git = "https://github.com/Fancy2209/ruffle", branch = "psvita" }
+ruffle_render = { git = "https://github.com/ruffle-rs/ruffle", branch = "master" }
+ruffle_render_glow = { path = "ruffle_render_glow" }
 anyhow = "1.0"
+glow = { git = "https://github.com/grovesNL/glow", branch = "main", features = [] }
 
 [package.metadata.vita]
-title_id = "RUFFLEVIT"
+title_id = "RUFFLVITA"
 title_name = "Ruffle"
 
 

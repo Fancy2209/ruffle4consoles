@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use anyhow::anyhow;
-use log::VitaLogBackend;
+use log::ConsoleLogBackend;
 use ruffle_core::config::Letterbox;
 use ruffle_core::events::{GamepadButton, KeyCode, MouseButton};
 use ruffle_core::limits::ExecutionLimit;
@@ -87,7 +87,7 @@ fn main() {
     let gl_attr = sdl2_video.gl_attr();
     gl_attr.set_context_profile(sdl2::video::GLProfile::GLES);
     gl_attr.set_context_version(2, 0);
-    
+
     let mut controllers: Vec<sdl2::controller::GameController> = Vec::new();
     println!("{}", sdl2_joystick.num_joysticks().unwrap());
     for i in 0..sdl2_joystick.num_joysticks().unwrap() {
@@ -137,7 +137,7 @@ fn main() {
 
     let movie = SwfMovie::from_data(bytes, "./movie.swf".to_string(), None)
         .map_err(|e| anyhow!(e.to_string()));
-    let log = VitaLogBackend::default();
+    let log = ConsoleLogBackend::default();
 
     // Glow can only realistically be used in vita and horizon, need
     let context: glow::Context;
@@ -147,14 +147,15 @@ fn main() {
     }
     let renderer = GlowRenderBackend::new(context, false, StageQuality::High).unwrap();
 
-    let mut gamepad_button_mapping: HashMap<GamepadButton, KeyCode> = HashMap::new();
-    gamepad_button_mapping.insert(GamepadButton::DPadUp, KeyCode::UP);
-    gamepad_button_mapping.insert(GamepadButton::DPadDown, KeyCode::DOWN);
-    gamepad_button_mapping.insert(GamepadButton::DPadLeft, KeyCode::LEFT);
-    gamepad_button_mapping.insert(GamepadButton::DPadRight, KeyCode::RIGHT);
-    gamepad_button_mapping.insert(GamepadButton::South, KeyCode::S);
-    gamepad_button_mapping.insert(GamepadButton::West, KeyCode::A);
-    gamepad_button_mapping.insert(GamepadButton::East, KeyCode::UP);
+    let gamepad_button_mapping: HashMap<GamepadButton, KeyCode> = HashMap::from([
+        (GamepadButton::DPadUp, KeyCode::UP),
+        (GamepadButton::DPadDown, KeyCode::DOWN),
+        (GamepadButton::DPadLeft, KeyCode::LEFT),
+        (GamepadButton::DPadRight, KeyCode::RIGHT),
+        (GamepadButton::South, KeyCode::S),
+        (GamepadButton::West, KeyCode::A),
+        (GamepadButton::East, KeyCode::UP),
+    ]);
 
     let player = PlayerBuilder::new()
         .with_log(log.clone())

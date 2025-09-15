@@ -1,15 +1,15 @@
 use ruffle_core::backend::log::LogBackend;
 
 #[derive(Clone)]
-pub struct VitaLogBackend {}
+pub struct ConsoleLogBackend {}
 
-impl Default for VitaLogBackend {
+impl Default for ConsoleLogBackend {
     fn default() -> Self {
         Self {}
     }
 }
 
-impl LogBackend for VitaLogBackend {
+impl LogBackend for ConsoleLogBackend {
     fn avm_trace(&self, message: &str) {
         println!("{}", message);
     }

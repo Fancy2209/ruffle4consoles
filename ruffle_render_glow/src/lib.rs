@@ -107,9 +107,6 @@ pub struct GlowRenderBackend {
     /// glow context
     gl: Rc<glow::Context>,
 
-    render_width: u32,
-    render_height: u32,
-
     // The frame buffers used for resolving MSAA.
     msaa_buffers: Option<MsaaBuffers>,
     //msaa_sample_count: u32,
@@ -169,7 +166,6 @@ const MAX_GRADIENT_COLORS: usize = 15;
 impl GlowRenderBackend {
     pub fn new(
         glow_context: glow::Context,
-        dimensions: ViewportDimensions,
         is_transparent: bool,
         _quality: StageQuality,
     ) -> Result<Self, Error> {
@@ -177,8 +173,6 @@ impl GlowRenderBackend {
         unsafe {
 
             let gl = Rc::new(glow_context);
-            let render_width = dimensions.width;
-            let render_height = dimensions.height;
 
             // Determine MSAA sample count.
             //let mut msaa_sample_count = quality.sample_count().min(4);
@@ -210,9 +204,6 @@ impl GlowRenderBackend {
 
             let mut renderer = Self {
                 gl,
-
-                render_width,
-                render_height,
 
                 msaa_buffers: None,
                 //msaa_sample_count,
@@ -668,7 +659,7 @@ impl GlowRenderBackend {
                 gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
                 self.gl
-                    .viewport(0, 0, self.render_width as i32, self.render_height as i32);
+                    .viewport(0, 0, self.renderbuffer_width as i32, self.renderbuffer_height);
 
                 let program = &self.bitmap_program;
                 self.gl.use_program(Some(program.program));
@@ -845,8 +836,8 @@ impl RenderBackend for GlowRenderBackend {
         // We don't use `.clamp()` here because `self.gl.drawing_buffer_width()` and
         // `self.gl.drawing_buffer_height()` return zero when the WebGL context is lost,
         // then an assertion error would be triggered.
-        self.renderbuffer_width = (dimensions.width.max(1) as i32).min(self.render_width as i32);
-        self.renderbuffer_height = (dimensions.height.max(1) as i32).min(self.render_height as i32);
+        self.renderbuffer_width = (dimensions.width.max(1) as i32).min(dimensions.width as i32);
+        self.renderbuffer_height = (dimensions.height.max(1) as i32).min(dimensions.height as i32);
 
         // Recreate framebuffers with the new size.
         let _ = self.build_msaa_buffers();

@@ -1,4 +1,5 @@
 mod log;
+mod audio;
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -15,6 +16,8 @@ use ruffle_render_glow::GlowRenderBackend;
 
 #[cfg(target_os = "horizon")]
 use sdl2::libc;
+
+use crate::audio::SdlAudioBackend;
 
 #[cfg(target_os = "vita")]
 #[link(name = "SDL2", kind = "static")]
@@ -146,7 +149,7 @@ fn main() {
             glow::Context::from_loader_function(|s| sdl2_video.gl_get_proc_address(s) as *const _);
     }
     let renderer = GlowRenderBackend::new(context, false, StageQuality::High).unwrap();
-
+    let audio = SdlAudioBackend::new(sdl2_context.audio().unwrap()).unwrap();
     let gamepad_button_mapping: HashMap<GamepadButton, KeyCode> = HashMap::from([
         (GamepadButton::DPadUp, KeyCode::UP),
         (GamepadButton::DPadDown, KeyCode::DOWN),
@@ -160,6 +163,7 @@ fn main() {
     let player = PlayerBuilder::new()
         .with_log(log.clone())
         .with_renderer(renderer)
+        .with_audio(audio)
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
         .with_fullscreen(true)

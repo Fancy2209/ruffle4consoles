@@ -109,7 +109,8 @@ pub struct GlowRenderBackend {
 
     // The frame buffers used for resolving MSAA.
     msaa_buffers: Option<MsaaBuffers>,
-    //msaa_sample_count: u32,
+    #[cfg(not(target_os = "vita"))]
+    msaa_sample_count: u32,
 
     color_program: ShaderProgram,
     bitmap_program: ShaderProgram,
@@ -167,6 +168,9 @@ impl GlowRenderBackend {
     pub fn new(
         glow_context: glow::Context,
         is_transparent: bool,
+        #[cfg(not(target_os = "vita"))]
+        quality: StageQuality,
+        #[cfg(target_os = "vita")]
         _quality: StageQuality,
     ) -> Result<Self, Error> {
         log::info!("Creating glow context.");
@@ -175,13 +179,15 @@ impl GlowRenderBackend {
             let gl = Rc::new(glow_context);
 
             // Determine MSAA sample count.
-            //let mut msaa_sample_count = quality.sample_count().min(4);
+            #[cfg(not(target_os = "vita"))]
+            let mut msaa_sample_count = quality.sample_count().min(4);
 
             //// Ensure that we don't exceed the max MSAA of this device.
-            //if msaa_sample_count > 16 {
-            //    log::info!("Device only supports 16xMSAA");
-            //    msaa_sample_count = 16;
-            //}
+            #[cfg(not(target_os = "vita"))]
+            if msaa_sample_count > 16 {
+                log::info!("Device only supports 16xMSAA");
+                msaa_sample_count = 16;
+            }
 
             let color_vertex = Self::compile_shader(&gl, glow::VERTEX_SHADER, COLOR_VERTEX_GLSL)?;
             let texture_vertex =
@@ -206,7 +212,8 @@ impl GlowRenderBackend {
                 gl,
 
                 msaa_buffers: None,
-                //msaa_sample_count,
+                #[cfg(not(target_os = "vita"))]
+                msaa_sample_count,
 
                 color_program,
                 gradient_program,
@@ -368,10 +375,123 @@ impl GlowRenderBackend {
     }
 
     fn build_msaa_buffers(&mut self) -> Result<(), Error> {
+        #[cfg(target_os = "vita")]
         unsafe {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
             self.gl.bind_renderbuffer(glow::RENDERBUFFER, None);
             return Ok(());
+        }
+        #[cfg(not(target_os = "vita"))]
+        unsafe {
+            let gl = self.gl.as_ref();
+
+        // Delete previous buffers, if they exist.
+        if let Some(msaa_buffers) = self.msaa_buffers.take() {
+            gl.delete_renderbuffer(msaa_buffers.color_renderbuffer);
+            gl.delete_renderbuffer(msaa_buffers.stencil_renderbuffer);
+            gl.delete_framebuffer(msaa_buffers.render_framebuffer);
+            gl.delete_framebuffer(msaa_buffers.color_framebuffer);
+            gl.delete_texture(msaa_buffers.framebuffer_texture);
+        }
+
+        // Create frame and render buffers.
+        let render_framebuffer = gl
+            .create_framebuffer()
+            .expect(&Error::UnableToCreateFrameBuffer.to_string());
+        let color_framebuffer = gl
+            .create_framebuffer()
+            .expect(&Error::UnableToCreateFrameBuffer.to_string());
+
+        // Note for future self:
+        // Whenever we support playing transparent movies,
+        // switch this to RGBA and probably need to change shaders to all
+        // be premultiplied alpha.
+        let color_renderbuffer = gl
+            .create_renderbuffer()
+            .expect(&Error::UnableToCreateRenderBuffer.to_string());
+        gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color_renderbuffer));
+        gl.renderbuffer_storage_multisample(
+            glow::RENDERBUFFER,
+            self.msaa_sample_count as i32,
+            glow::RGBA8,
+            self.renderbuffer_width,
+            self.renderbuffer_height,
+        );
+        //gl.check_error("renderbuffer_storage_multisample (color)")?;
+
+        let stencil_renderbuffer = gl
+            .create_renderbuffer()
+            .expect(&Error::UnableToCreateFrameBuffer.to_string());
+        gl.bind_renderbuffer(glow::RENDERBUFFER, Some(&stencil_renderbuffer));
+        gl.renderbuffer_storage_multisample(
+            glow::RENDERBUFFER,
+            self.msaa_sample_count as i32,
+            glow::STENCIL_INDEX8,
+            self.renderbuffer_width,
+            self.renderbuffer_height,
+        );
+        //gl.check_error("renderbuffer_storage_multisample (stencil)")?;
+
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(render_framebuffer));
+        gl.framebuffer_renderbuffer(
+            glow::FRAMEBUFFER,
+            glow::COLOR_ATTACHMENT0,
+            glow::RENDERBUFFER,
+            Some(color_renderbuffer),
+        );
+        gl.framebuffer_renderbuffer(
+            glow::FRAMEBUFFER,
+            glow::STENCIL_ATTACHMENT,
+            glow::RENDERBUFFER,
+            Some(stencil_renderbuffer),
+        );
+
+        let framebuffer_texture = gl.create_texture().ok_or(Error::UnableToCreateTexture)?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(&framebuffer_texture));
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA as i32,
+            self.renderbuffer_width,
+            self.renderbuffer_height,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(None),
+        );
+        gl.bind_texture(glow::TEXTURE_2D, None);
+
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(color_framebuffer));
+        gl.framebuffer_texture_2d(
+            glow::FRAMEBUFFER,
+            glow::COLOR_ATTACHMENT0,
+            glow::TEXTURE_2D,
+            Some(&framebuffer_texture),
+            0,
+        );
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+
+        self.msaa_buffers = Some(MsaaBuffers {
+            color_renderbuffer,
+            stencil_renderbuffer,
+            render_framebuffer,
+            color_framebuffer,
+            framebuffer_texture,
+        });
+
+        Ok(())
         }
     }
 
@@ -1504,8 +1624,10 @@ enum DrawType {
 
 
 struct MsaaBuffers {
-    //color_renderbuffer: NativeRenderbuffer,
-    //stencil_renderbuffer: NativeRenderbuffer,
+    #[cfg(not(target_os = "vita"))]
+    color_renderbuffer: NativeRenderbuffer,
+    #[cfg(not(target_os = "vita"))]
+    stencil_renderbuffer: NativeRenderbuffer,
     render_framebuffer: NativeFramebuffer,
     color_framebuffer: NativeFramebuffer,
     framebuffer_texture: NativeTexture,

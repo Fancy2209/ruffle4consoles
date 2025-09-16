@@ -3,9 +3,10 @@ use ruffle_core::backend::log::LogBackend;
 #[derive(Clone)]
 pub struct ConsoleLogBackend {}
 
-impl Default for ConsoleLogBackend {
-    fn default() -> Self {
-        Self {}
+impl ConsoleLogBackend {
+    pub fn new() -> ConsoleLogBackend
+    {
+        return ConsoleLogBackend{};
     }
 }
 

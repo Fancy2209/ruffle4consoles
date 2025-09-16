@@ -3,7 +3,7 @@
 #![allow(clippy::arc_with_non_send_sync)]
 
 use bytemuck::{Pod, Zeroable};
-use glow::*;
+use egui_glow::glow::*;
 use ruffle_render::backend::{
     BitmapCacheEntry, Context3D, Context3DProfile, PixelBenderOutput, PixelBenderTarget,
     RenderBackend, ShapeHandle, ShapeHandleImpl, ViewportDimensions,
@@ -23,7 +23,6 @@ use ruffle_render::tessellator::{
 use ruffle_render::transform::Transform;
 use std::any::Any;
 use std::borrow::Cow;
-use std::rc::Rc;
 use std::sync::Arc;
 use swf::{BlendMode, Color, Twips};
 use thiserror::Error;
@@ -105,11 +104,12 @@ impl From<TessVertex> for Vertex {
 
 pub struct GlowRenderBackend {
     /// glow context
-    gl: Rc<glow::Context>,
+    gl: Arc<egui_glow::glow::Context>,
 
     // The frame buffers used for resolving MSAA.
     msaa_buffers: Option<MsaaBuffers>,
-    //msaa_sample_count: u32,
+    #[cfg(not(target_os = "vita"))]
+    msaa_sample_count: u32,
 
     color_program: ShaderProgram,
     bitmap_program: ShaderProgram,
@@ -141,10 +141,10 @@ pub struct GlowRenderBackend {
 
 #[derive(Debug)]
 struct RegistryData {
-    gl: Rc<glow::Context>,
+    gl: Arc<egui_glow::glow::Context>,
     width: u32,
     height: u32,
-    texture: glow::NativeTexture,
+    texture: egui_glow::glow::NativeTexture,
 }
 
 impl Drop for RegistryData {
@@ -165,48 +165,51 @@ const MAX_GRADIENT_COLORS: usize = 15;
 
 impl GlowRenderBackend {
     pub fn new(
-        glow_context: glow::Context,
+        glow_context: Arc<egui_glow::glow::Context>,
         is_transparent: bool,
+        #[cfg(target_os = "vita")]
         _quality: StageQuality,
+        #[cfg(not(target_os = "vita"))]
+        quality: StageQuality,
     ) -> Result<Self, Error> {
         log::info!("Creating glow context.");
         unsafe {
-
-            let gl = Rc::new(glow_context);
-
             // Determine MSAA sample count.
-            //let mut msaa_sample_count = quality.sample_count().min(4);
+            #[cfg(not(target_os = "vita"))]
+            let mut msaa_sample_count = quality.sample_count().min(4);
 
-            //// Ensure that we don't exceed the max MSAA of this device.
-            //if msaa_sample_count > 16 {
-            //    log::info!("Device only supports 16xMSAA");
-            //    msaa_sample_count = 16;
-            //}
+            // Ensure that we don't exceed the max MSAA of this device.
+            #[cfg(not(target_os = "vita"))]
+            if msaa_sample_count > 16 {
+                log::info!("Device only supports 16xMSAA");
+                msaa_sample_count = 16;
+            }
 
-            let color_vertex = Self::compile_shader(&gl, glow::VERTEX_SHADER, COLOR_VERTEX_GLSL)?;
+            let color_vertex = Self::compile_shader(&glow_context, egui_glow::glow::VERTEX_SHADER, COLOR_VERTEX_GLSL)?;
             let texture_vertex =
-                Self::compile_shader(&gl, glow::VERTEX_SHADER, TEXTURE_VERTEX_GLSL)?;
+                Self::compile_shader(&glow_context, egui_glow::glow::VERTEX_SHADER, TEXTURE_VERTEX_GLSL)?;
             let color_fragment =
-                Self::compile_shader(&gl, glow::FRAGMENT_SHADER, COLOR_FRAGMENT_GLSL)?;
+                Self::compile_shader(&glow_context, egui_glow::glow::FRAGMENT_SHADER, COLOR_FRAGMENT_GLSL)?;
             let bitmap_fragment =
-                Self::compile_shader(&gl, glow::FRAGMENT_SHADER, BITMAP_FRAGMENT_GLSL)?;
+                Self::compile_shader(&glow_context, egui_glow::glow::FRAGMENT_SHADER, BITMAP_FRAGMENT_GLSL)?;
             let gradient_fragment =
-                Self::compile_shader(&gl, glow::FRAGMENT_SHADER, GRADIENT_FRAGMENT_GLSL)?;
+                Self::compile_shader(&glow_context, egui_glow::glow::FRAGMENT_SHADER, GRADIENT_FRAGMENT_GLSL)?;
 
-            let color_program = ShaderProgram::new(&gl, color_vertex, color_fragment)?;
-            let bitmap_program = ShaderProgram::new(&gl, texture_vertex, bitmap_fragment)?;
-            let gradient_program = ShaderProgram::new(&gl, texture_vertex, gradient_fragment)?;
+            let color_program = ShaderProgram::new(&glow_context, color_vertex, color_fragment)?;
+            let bitmap_program = ShaderProgram::new(&glow_context, texture_vertex, bitmap_fragment)?;
+            let gradient_program = ShaderProgram::new(&glow_context, texture_vertex, gradient_fragment)?;
 
-            gl.enable(glow::BLEND);
+            glow_context.enable(egui_glow::glow::BLEND);
 
             // Necessary to load RGB textures (alignment defaults to 4).
-            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+            glow_context.pixel_store_i32(egui_glow::glow::UNPACK_ALIGNMENT, 1);
 
             let mut renderer = Self {
-                gl,
+                gl: glow_context,
 
                 msaa_buffers: None,
-                //msaa_sample_count,
+                #[cfg(not(target_os = "vita"))]
+                msaa_sample_count,
 
                 color_program,
                 gradient_program,
@@ -255,9 +258,9 @@ impl GlowRenderBackend {
 
         unsafe {
             let vertex_buffer = self.gl.create_buffer().unwrap();
-            self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+            self.gl.bind_buffer(egui_glow::glow::ARRAY_BUFFER, Some(vertex_buffer));
             self.gl.buffer_data_u8_slice(
-                glow::ARRAY_BUFFER,
+                egui_glow::glow::ARRAY_BUFFER,
                 bytemuck::cast_slice(&[
                     Vertex {
                         position: [0.0, 0.0],
@@ -276,23 +279,23 @@ impl GlowRenderBackend {
                         color: 0xffff_ffff,
                     },
                 ]),
-                glow::STATIC_DRAW,
+                egui_glow::glow::STATIC_DRAW,
             );
 
             let index_buffer = self.gl.create_buffer().unwrap();
             self.gl
-                .bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
+                .bind_buffer(egui_glow::glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
             self.gl.buffer_data_u8_slice(
-                glow::ELEMENT_ARRAY_BUFFER,
+                egui_glow::glow::ELEMENT_ARRAY_BUFFER,
                 bytemuck::cast_slice(&[0u32, 1, 2, 3]),
-                glow::STATIC_DRAW,
+                egui_glow::glow::STATIC_DRAW,
             );
 
             if program.vertex_position_location != 0xffff_ffff {
                 self.gl.vertex_attrib_pointer_f32(
                     program.vertex_position_location,
                     2,
-                    glow::FLOAT,
+                    egui_glow::glow::FLOAT,
                     false,
                     12,
                     0,
@@ -305,7 +308,7 @@ impl GlowRenderBackend {
                 self.gl.vertex_attrib_pointer_f32(
                     program.vertex_color_location,
                     4,
-                    glow::UNSIGNED_BYTE,
+                    egui_glow::glow::UNSIGNED_BYTE,
                     true,
                     12,
                     8,
@@ -347,10 +350,10 @@ impl GlowRenderBackend {
     }
 
     fn compile_shader(
-        gl: &glow::Context,
+        gl: &egui_glow::glow::Context,
         shader_type: u32,
         glsl_src: &str,
-    ) -> Result<glow::NativeShader, Error> {
+    ) -> Result<egui_glow::glow::NativeShader, Error> {
         unsafe {
             let shader = gl
                 .create_shader(shader_type)
@@ -368,10 +371,141 @@ impl GlowRenderBackend {
     }
 
     fn build_msaa_buffers(&mut self) -> Result<(), Error> {
+        #[cfg(target_os = "vita")]
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            self.gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+            self.gl.bind_framebuffer(egui_glow::glow::FRAMEBUFFER, None);
+            self.gl.bind_renderbuffer(egui_glow::glow::RENDERBUFFER, None);
             return Ok(());
+        }
+        #[cfg(not(target_os = "vita"))]
+        unsafe {
+            if let Some(msaa_buffers) = self.msaa_buffers.take() {
+                self.gl.delete_renderbuffer(msaa_buffers.color_renderbuffer);
+                self.gl
+                    .delete_renderbuffer(msaa_buffers.stencil_renderbuffer);
+                self.gl.delete_framebuffer(msaa_buffers.render_framebuffer);
+                self.gl.delete_framebuffer(msaa_buffers.color_framebuffer);
+                self.gl.delete_texture(msaa_buffers.framebuffer_texture);
+            }
+
+            // Create frame and render buffers.
+            let render_framebuffer = self
+                .gl
+                .create_framebuffer()
+                .expect(&Error::UnableToCreateFrameBuffer.to_string());
+            let color_framebuffer = self
+                .gl
+                .create_framebuffer()
+                .expect(&Error::UnableToCreateFrameBuffer.to_string());
+
+            // Note for future self:
+            // Whenever we support playing transparent movies,
+            // switch this to RGBA and probably need to change shaders to all
+            // be premultiplied alpha.
+            let color_renderbuffer = self
+                .gl
+                .create_renderbuffer()
+                .expect(&Error::UnableToCreateRenderBuffer.to_string());
+            self.gl
+                .bind_renderbuffer(egui_glow::glow::RENDERBUFFER, Some(color_renderbuffer));
+            self.gl.renderbuffer_storage_multisample(
+                egui_glow::glow::RENDERBUFFER,
+                self.msaa_sample_count as i32,
+                egui_glow::glow::RGBA8,
+                self.renderbuffer_width,
+                self.renderbuffer_height,
+            );
+            //gl.check_error("renderbuffer_storage_multisample (color)")?;
+
+            let stencil_renderbuffer = self
+                .gl
+                .create_renderbuffer()
+                .expect(&Error::UnableToCreateFrameBuffer.to_string());
+            self.gl
+                .bind_renderbuffer(egui_glow::glow::RENDERBUFFER, Some(stencil_renderbuffer));
+            self.gl.renderbuffer_storage_multisample(
+                egui_glow::glow::RENDERBUFFER,
+                self.msaa_sample_count as i32,
+                egui_glow::glow::STENCIL_INDEX8,
+                self.renderbuffer_width,
+                self.renderbuffer_height,
+            );
+            //gl.check_error("renderbuffer_storage_multisample (stencil)")?;
+
+            self.gl
+                .bind_framebuffer(egui_glow::glow::FRAMEBUFFER, Some(render_framebuffer));
+            self.gl.framebuffer_renderbuffer(
+                egui_glow::glow::FRAMEBUFFER,
+                egui_glow::glow::COLOR_ATTACHMENT0,
+                egui_glow::glow::RENDERBUFFER,
+                Some(color_renderbuffer),
+            );
+            self.gl.framebuffer_renderbuffer(
+                egui_glow::glow::FRAMEBUFFER,
+                egui_glow::glow::STENCIL_ATTACHMENT,
+                egui_glow::glow::RENDERBUFFER,
+                Some(stencil_renderbuffer),
+            );
+
+            let framebuffer_texture = self
+                .gl
+                .create_texture()
+                .expect(&Error::UnableToCreateTexture.to_string());
+            self.gl
+                .bind_texture(egui_glow::glow::TEXTURE_2D, Some(framebuffer_texture));
+            self.gl.tex_parameter_i32(
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_MAG_FILTER,
+            egui_glow::glow::NEAREST as i32,
+            );
+            self.gl.tex_parameter_i32(
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_MIN_FILTER,
+                egui_glow::glow::NEAREST as i32,
+            );
+            self.gl.tex_parameter_i32(
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_WRAP_S,
+                egui_glow::glow::CLAMP_TO_EDGE as i32,
+            );
+            self.gl.tex_parameter_i32(
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_WRAP_T,
+                egui_glow::glow::CLAMP_TO_EDGE as i32,
+            );
+            self.gl.tex_image_2d(
+                egui_glow::glow::TEXTURE_2D,
+                0,
+                egui_glow::glow::RGBA as i32,
+                self.renderbuffer_width,
+                self.renderbuffer_height,
+                0,
+                egui_glow::glow::RGBA,
+                egui_glow::glow::UNSIGNED_BYTE,
+                egui_glow::glow::PixelUnpackData::Slice(None),
+            );
+            self.gl.bind_texture(egui_glow::glow::TEXTURE_2D, None);
+
+            self.gl
+                .bind_framebuffer(egui_glow::glow::FRAMEBUFFER, Some(color_framebuffer));
+            self.gl.framebuffer_texture_2d(
+                egui_glow::glow::FRAMEBUFFER,
+                egui_glow::glow::COLOR_ATTACHMENT0,
+                egui_glow::glow::TEXTURE_2D,
+                Some(framebuffer_texture),
+                0,
+            );
+            self.gl.bind_framebuffer(egui_glow::glow::FRAMEBUFFER, None);
+
+            self.msaa_buffers = Some(MsaaBuffers {
+                color_renderbuffer,
+                stencil_renderbuffer,
+                render_framebuffer,
+                color_framebuffer,
+                framebuffer_texture,
+            });
+
+            Ok(())
         }
     }
 
@@ -394,22 +528,22 @@ impl GlowRenderBackend {
 
                 let vao = self.create_vertex_array()?;
                 let vertex_buffer = self.gl.create_buffer().unwrap();
-                self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+                self.gl.bind_buffer(egui_glow::glow::ARRAY_BUFFER, Some(vertex_buffer));
 
                 let vertices: Vec<_> = draw.vertices.into_iter().map(Vertex::from).collect();
                 self.gl.buffer_data_u8_slice(
-                    glow::ARRAY_BUFFER,
+                    egui_glow::glow::ARRAY_BUFFER,
                     bytemuck::cast_slice(&vertices),
-                    glow::STATIC_DRAW,
+                    egui_glow::glow::STATIC_DRAW,
                 );
 
                 let index_buffer = self.gl.create_buffer().unwrap();
                 self.gl
-                    .bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
+                    .bind_buffer(egui_glow::glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
                 self.gl.buffer_data_u8_slice(
-                    glow::ELEMENT_ARRAY_BUFFER,
+                    egui_glow::glow::ELEMENT_ARRAY_BUFFER,
                     bytemuck::cast_slice(&draw.indices),
-                    glow::STATIC_DRAW,
+                    egui_glow::glow::STATIC_DRAW,
                 );
 
                 let program = match draw.draw_type {
@@ -426,7 +560,7 @@ impl GlowRenderBackend {
                     self.gl.vertex_attrib_pointer_f32(
                         program.vertex_position_location,
                         2,
-                        glow::FLOAT,
+                        egui_glow::glow::FLOAT,
                         false,
                         12,
                         0,
@@ -439,7 +573,7 @@ impl GlowRenderBackend {
                     self.gl.vertex_attrib_pointer_f32(
                         program.vertex_color_location,
                         4,
-                        glow::UNSIGNED_BYTE,
+                        egui_glow::glow::UNSIGNED_BYTE,
                         true,
                         12,
                         8,
@@ -537,28 +671,28 @@ impl GlowRenderBackend {
             if self.mask_state_dirty {
                 match self.mask_state {
                     MaskState::NoMask => {
-                        self.gl.disable(glow::STENCIL_TEST);
+                        self.gl.disable(egui_glow::glow::STENCIL_TEST);
                         self.gl.color_mask(true, true, true, true);
                     }
                     MaskState::DrawMaskStencil => {
-                        self.gl.enable(glow::STENCIL_TEST);
+                        self.gl.enable(egui_glow::glow::STENCIL_TEST);
                         self.gl
-                            .stencil_func(glow::EQUAL, (self.num_masks - 1) as i32, 0xff);
-                        self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::INCR);
+                            .stencil_func(egui_glow::glow::EQUAL, (self.num_masks - 1) as i32, 0xff);
+                        self.gl.stencil_op(egui_glow::glow::KEEP, egui_glow::glow::KEEP, egui_glow::glow::INCR);
                         self.gl.color_mask(false, false, false, false);
                     }
                     MaskState::DrawMaskedContent => {
-                        self.gl.enable(glow::STENCIL_TEST);
+                        self.gl.enable(egui_glow::glow::STENCIL_TEST);
                         self.gl
-                            .stencil_func(glow::EQUAL, self.num_masks as i32, 0xff);
-                        self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+                            .stencil_func(egui_glow::glow::EQUAL, self.num_masks as i32, 0xff);
+                        self.gl.stencil_op(egui_glow::glow::KEEP, egui_glow::glow::KEEP, egui_glow::glow::KEEP);
                         self.gl.color_mask(true, true, true, true);
                     }
                     MaskState::ClearMaskStencil => {
-                        self.gl.enable(glow::STENCIL_TEST);
+                        self.gl.enable(egui_glow::glow::STENCIL_TEST);
                         self.gl
-                            .stencil_func(glow::EQUAL, self.num_masks as i32, 0xff);
-                        self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::DECR);
+                            .stencil_func(egui_glow::glow::EQUAL, self.num_masks as i32, 0xff);
+                        self.gl.stencil_op(egui_glow::glow::KEEP, egui_glow::glow::KEEP, egui_glow::glow::DECR);
                         self.gl.color_mask(false, false, false, false);
                     }
                 }
@@ -571,24 +705,24 @@ impl GlowRenderBackend {
             let (blend_op, src_rgb, dst_rgb) = match mode {
                 RenderBlendMode::Builtin(BlendMode::Normal) => {
                     // src + (1-a)
-                    (glow::FUNC_ADD, glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+                    (egui_glow::glow::FUNC_ADD, egui_glow::glow::ONE, egui_glow::glow::ONE_MINUS_SRC_ALPHA)
                 }
                 RenderBlendMode::Builtin(BlendMode::Add) => {
                     // src + dst
-                    (glow::FUNC_ADD, glow::ONE, glow::ONE)
+                    (egui_glow::glow::FUNC_ADD, egui_glow::glow::ONE, egui_glow::glow::ONE)
                 }
                 RenderBlendMode::Builtin(BlendMode::Subtract) => {
                     // dst - src
-                    (glow::FUNC_REVERSE_SUBTRACT, glow::ONE, glow::ONE)
+                    (egui_glow::glow::FUNC_REVERSE_SUBTRACT, egui_glow::glow::ONE, egui_glow::glow::ONE)
                 }
                 _ => {
                     // TODO: Unsupported blend mode. Default to normal for now.
-                    (glow::FUNC_ADD, glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+                    (egui_glow::glow::FUNC_ADD, egui_glow::glow::ONE, egui_glow::glow::ONE_MINUS_SRC_ALPHA)
                 }
             };
-            self.gl.blend_equation_separate(blend_op, glow::FUNC_ADD);
+            self.gl.blend_equation_separate(blend_op, egui_glow::glow::FUNC_ADD);
             self.gl
-                .blend_func_separate(src_rgb, dst_rgb, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+                .blend_func_separate(src_rgb, dst_rgb, egui_glow::glow::ONE, egui_glow::glow::ONE_MINUS_SRC_ALPHA);
         }
     }
 
@@ -605,7 +739,7 @@ impl GlowRenderBackend {
             // Bind to MSAA render buffer if using MSAA.
             if let Some(msaa_buffers) = &self.msaa_buffers {
                 let gl = &self.gl;
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(msaa_buffers.render_framebuffer));
+                gl.bind_framebuffer(egui_glow::glow::FRAMEBUFFER, Some(msaa_buffers.render_framebuffer));
             }
 
             self.gl
@@ -624,7 +758,7 @@ impl GlowRenderBackend {
             }
             self.gl.stencil_mask(0xff);
             self.gl
-                .clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+                .clear(egui_glow::glow::COLOR_BUFFER_BIT | egui_glow::glow::STENCIL_BUFFER_BIT);
         }
     }
 
@@ -633,15 +767,15 @@ impl GlowRenderBackend {
             // Resolve MSAA, if we're using it (WebGL2).
             if let (gl, Some(ref msaa_buffers)) = (&self.gl, &self.msaa_buffers) {
                 // Disable any remaining masking state.
-                self.gl.disable(glow::STENCIL_TEST);
+                self.gl.disable(egui_glow::glow::STENCIL_TEST);
                 self.gl.color_mask(true, true, true, true);
 
                 // Resolve the MSAA in the render buffer.
                 gl.bind_framebuffer(
-                    glow::READ_FRAMEBUFFER,
+                    egui_glow::glow::READ_FRAMEBUFFER,
                     Some(msaa_buffers.render_framebuffer),
                 );
-                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(msaa_buffers.color_framebuffer));
+                gl.bind_framebuffer(egui_glow::glow::DRAW_FRAMEBUFFER, Some(msaa_buffers.color_framebuffer));
                 gl.blit_framebuffer(
                     0,
                     0,
@@ -651,15 +785,19 @@ impl GlowRenderBackend {
                     0,
                     self.renderbuffer_width,
                     self.renderbuffer_height,
-                    glow::COLOR_BUFFER_BIT,
-                    glow::NEAREST,
+                    egui_glow::glow::COLOR_BUFFER_BIT,
+                    egui_glow::glow::NEAREST,
                 );
 
                 // Render the resolved framebuffer texture to a quad on the screen.
-                gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+                gl.bind_framebuffer(egui_glow::glow::FRAMEBUFFER, None);
 
-                self.gl
-                    .viewport(0, 0, self.renderbuffer_width as i32, self.renderbuffer_height);
+                self.gl.viewport(
+                    0,
+                    0,
+                    self.renderbuffer_width as i32,
+                    self.renderbuffer_height,
+                );
 
                 let program = &self.bitmap_program;
                 self.gl.use_program(Some(program.program));
@@ -695,18 +833,18 @@ impl GlowRenderBackend {
                 );
 
                 // Bind the framebuffer texture.
-                self.gl.active_texture(glow::TEXTURE0);
+                self.gl.active_texture(egui_glow::glow::TEXTURE0);
                 self.gl
-                    .bind_texture(glow::TEXTURE_2D, Some(msaa_buffers.framebuffer_texture));
+                    .bind_texture(egui_glow::glow::TEXTURE_2D, Some(msaa_buffers.framebuffer_texture));
                 program.uniform1i(&self.gl, ShaderUniform::BitmapTexture, 0);
 
                 // Render the quad.
                 let quad = &self.bitmap_quad_draws;
                 self.bind_vertex_array(Some(quad[0].vao));
                 self.gl.draw_elements(
-                    glow::TRIANGLE_FAN,
+                    egui_glow::glow::TRIANGLE_FAN,
                     quad[0].num_indices,
-                    glow::UNSIGNED_INT,
+                    egui_glow::glow::UNSIGNED_INT,
                     0,
                 );
             }
@@ -792,7 +930,7 @@ impl GlowRenderBackend {
             } else {
                 COUNT
             };
-            self.gl.draw_elements(MODE, count, glow::UNSIGNED_INT, 0);
+            self.gl.draw_elements(MODE, count, egui_glow::glow::UNSIGNED_INT, 0);
         }
     }
 }
@@ -886,43 +1024,43 @@ impl RenderBackend for GlowRenderBackend {
     fn register_bitmap(&mut self, bitmap: Bitmap<'_>) -> Result<BitmapHandle, BitmapError> {
         unsafe {
             let (format, bitmap) = match bitmap.format() {
-                BitmapFormat::Rgb | BitmapFormat::Yuv420p => (glow::RGB, bitmap.to_rgb()),
-                BitmapFormat::Rgba | BitmapFormat::Yuva420p => (glow::RGBA, bitmap.to_rgba()),
+                BitmapFormat::Rgb | BitmapFormat::Yuv420p => (egui_glow::glow::RGB, bitmap.to_rgb()),
+                BitmapFormat::Rgba | BitmapFormat::Yuva420p => (egui_glow::glow::RGBA, bitmap.to_rgba()),
             };
             let texture = self.gl.create_texture().expect("Unable to create texture");
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.gl.bind_texture(egui_glow::glow::TEXTURE_2D, Some(texture));
             self.gl.tex_image_2d(
-                glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_2D,
                 0,
                 format as i32,
                 bitmap.width() as i32,
                 bitmap.height() as i32,
                 0,
                 format,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(bitmap.data())),
+                egui_glow::glow::UNSIGNED_BYTE,
+                egui_glow::glow::PixelUnpackData::Slice(Some(bitmap.data())),
             );
 
             // You must set the texture parameters for non-power-of-2 textures to function in WebGL1.
             self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_S,
-                glow::CLAMP_TO_EDGE as i32,
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_WRAP_S,
+                egui_glow::glow::CLAMP_TO_EDGE as i32,
             );
             self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_T,
-                glow::CLAMP_TO_EDGE as i32,
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_WRAP_T,
+                egui_glow::glow::CLAMP_TO_EDGE as i32,
             );
             self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MIN_FILTER,
-                glow::LINEAR as i32,
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_MIN_FILTER,
+                egui_glow::glow::LINEAR as i32,
             );
             self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MAG_FILTER,
-                glow::LINEAR as i32,
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_MAG_FILTER,
+                egui_glow::glow::LINEAR as i32,
             );
 
             Ok(BitmapHandle(Arc::new(RegistryData {
@@ -943,23 +1081,23 @@ impl RenderBackend for GlowRenderBackend {
         unsafe {
             let texture = as_registry_data(handle).texture;
 
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.gl.bind_texture(egui_glow::glow::TEXTURE_2D, Some(texture));
 
             let (format, bitmap) = match bitmap.format() {
-                BitmapFormat::Rgb | BitmapFormat::Yuv420p => (glow::RGB, bitmap.to_rgb()),
-                BitmapFormat::Rgba | BitmapFormat::Yuva420p => (glow::RGBA, bitmap.to_rgba()),
+                BitmapFormat::Rgb | BitmapFormat::Yuv420p => (egui_glow::glow::RGB, bitmap.to_rgb()),
+                BitmapFormat::Rgba | BitmapFormat::Yuva420p => (egui_glow::glow::RGBA, bitmap.to_rgba()),
             };
 
             self.gl.tex_image_2d(
-                glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_2D,
                 0,
                 format as i32,
                 bitmap.width() as i32,
                 bitmap.height() as i32,
                 0,
                 format,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(bitmap.data())),
+                egui_glow::glow::UNSIGNED_BYTE,
+                egui_glow::glow::PixelUnpackData::Slice(Some(bitmap.data())),
             );
 
             Ok(())
@@ -1018,28 +1156,28 @@ impl RenderBackend for GlowRenderBackend {
     ) -> Result<BitmapHandle, BitmapError> {
         unsafe {
             let texture = self.gl.create_texture().unwrap();
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.gl.bind_texture(egui_glow::glow::TEXTURE_2D, Some(texture));
 
             // You must set the texture parameters for non-power-of-2 textures to function in WebGL1.
             self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_S,
-                glow::CLAMP_TO_EDGE as i32,
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_WRAP_S,
+                egui_glow::glow::CLAMP_TO_EDGE as i32,
             );
             self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_T,
-                glow::CLAMP_TO_EDGE as i32,
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_WRAP_T,
+                egui_glow::glow::CLAMP_TO_EDGE as i32,
             );
             self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MIN_FILTER,
-                glow::LINEAR as i32,
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_MIN_FILTER,
+                egui_glow::glow::LINEAR as i32,
             );
             self.gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MAG_FILTER,
-                glow::LINEAR as i32,
+                egui_glow::glow::TEXTURE_2D,
+                egui_glow::glow::TEXTURE_MAG_FILTER,
+                egui_glow::glow::LINEAR as i32,
             );
 
             Ok(BitmapHandle(Arc::new(RegistryData {
@@ -1123,30 +1261,30 @@ impl CommandHandler for GlowRenderBackend {
             program.uniform_matrix3fv(&self.gl, ShaderUniform::TextureMatrix, bitmap_matrix);
 
             // Bind texture.
-            self.gl.active_texture(glow::TEXTURE0);
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(entry.texture));
+            self.gl.active_texture(egui_glow::glow::TEXTURE0);
+            self.gl.bind_texture(egui_glow::glow::TEXTURE_2D, Some(entry.texture));
             program.uniform1i(&self.gl, ShaderUniform::BitmapTexture, 0);
 
             // Set texture parameters.
             let filter = if smoothing {
-                glow::LINEAR as i32
+                egui_glow::glow::LINEAR as i32
             } else {
-                glow::NEAREST as i32
+                egui_glow::glow::NEAREST as i32
             };
             self.gl
-                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, filter);
+                .tex_parameter_i32(egui_glow::glow::TEXTURE_2D, egui_glow::glow::TEXTURE_MAG_FILTER, filter);
             self.gl
-                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, filter);
+                .tex_parameter_i32(egui_glow::glow::TEXTURE_2D, egui_glow::glow::TEXTURE_MIN_FILTER, filter);
 
-            let wrap = glow::CLAMP_TO_EDGE as i32;
+            let wrap = egui_glow::glow::CLAMP_TO_EDGE as i32;
             self.gl
-                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, wrap);
+                .tex_parameter_i32(egui_glow::glow::TEXTURE_2D, egui_glow::glow::TEXTURE_WRAP_S, wrap);
             self.gl
-                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, wrap);
+                .tex_parameter_i32(egui_glow::glow::TEXTURE_2D, egui_glow::glow::TEXTURE_WRAP_T, wrap);
 
             // Draw the triangles.
             self.gl
-                .draw_elements(glow::TRIANGLE_FAN, draw.num_indices, glow::UNSIGNED_INT, 0);
+                .draw_elements(egui_glow::glow::TRIANGLE_FAN, draw.num_indices, egui_glow::glow::UNSIGNED_INT, 0);
         }
     }
 
@@ -1275,42 +1413,42 @@ impl CommandHandler for GlowRenderBackend {
                         );
 
                         // Bind texture.
-                        self.gl.active_texture(glow::TEXTURE0);
-                        self.gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                        self.gl.active_texture(egui_glow::glow::TEXTURE0);
+                        self.gl.bind_texture(egui_glow::glow::TEXTURE_2D, Some(*texture));
                         program.uniform1i(&self.gl, ShaderUniform::BitmapTexture, 0);
 
                         // Set texture parameters.
                         let filter = if bitmap.is_smoothed {
-                            glow::LINEAR as i32
+                            egui_glow::glow::LINEAR as i32
                         } else {
-                            glow::NEAREST as i32
+                            egui_glow::glow::NEAREST as i32
                         };
                         self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_MAG_FILTER,
+                            egui_glow::glow::TEXTURE_2D,
+                            egui_glow::glow::TEXTURE_MAG_FILTER,
                             filter,
                         );
                         self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_MIN_FILTER,
+                            egui_glow::glow::TEXTURE_2D,
+                            egui_glow::glow::TEXTURE_MIN_FILTER,
                             filter,
                         );
                         // On WebGL1, you are unable to change the wrapping parameter of non-power-of-2 textures.
                         let wrap = if bitmap.is_repeating {
-                            glow::REPEAT as i32
+                            egui_glow::glow::REPEAT as i32
                         } else {
-                            glow::CLAMP_TO_EDGE as i32
+                            egui_glow::glow::CLAMP_TO_EDGE as i32
                         };
                         self.gl
-                            .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, wrap);
+                            .tex_parameter_i32(egui_glow::glow::TEXTURE_2D, egui_glow::glow::TEXTURE_WRAP_S, wrap);
                         self.gl
-                            .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, wrap);
+                            .tex_parameter_i32(egui_glow::glow::TEXTURE_2D, egui_glow::glow::TEXTURE_WRAP_T, wrap);
                     }
                 }
 
                 // Draw the triangles.
                 self.gl
-                    .draw_elements(glow::TRIANGLES, num_indices, glow::UNSIGNED_INT, 0);
+                    .draw_elements(egui_glow::glow::TRIANGLES, num_indices, egui_glow::glow::UNSIGNED_INT, 0);
             }
         }
     }
@@ -1320,19 +1458,19 @@ impl CommandHandler for GlowRenderBackend {
     }
 
     fn draw_rect(&mut self, color: Color, matrix: Matrix) {
-        self.draw_quad::<{ glow::TRIANGLE_FAN }, -1>(color, matrix)
+        self.draw_quad::<{ egui_glow::glow::TRIANGLE_FAN }, -1>(color, matrix)
     }
 
     fn draw_line(&mut self, color: Color, mut matrix: Matrix) {
         matrix.tx += Twips::HALF_PX;
         matrix.ty += Twips::HALF_PX;
-        self.draw_quad::<{ glow::LINE_STRIP }, 2>(color, matrix)
+        self.draw_quad::<{ egui_glow::glow::LINE_STRIP }, 2>(color, matrix)
     }
 
     fn draw_line_rect(&mut self, color: Color, mut matrix: Matrix) {
         matrix.tx += Twips::HALF_PX;
         matrix.ty += Twips::HALF_PX;
-        self.draw_quad::<{ glow::LINE_LOOP }, -1>(color, matrix)
+        self.draw_quad::<{ egui_glow::glow::LINE_LOOP }, -1>(color, matrix)
     }
 
     fn push_mask(&mut self) {
@@ -1449,7 +1587,7 @@ struct BitmapDraw {
 
 #[derive(Debug)]
 struct Mesh {
-    gl2: Rc<glow::Context>,
+    gl2: Arc<egui_glow::glow::Context>,
     draws: Vec<Draw>,
 }
 
@@ -1471,7 +1609,7 @@ fn as_mesh(handle: &ShapeHandle) -> &Mesh {
 
 #[derive(Debug)]
 struct Buffer {
-    gl: Rc<glow::Context>,
+    gl: Arc<egui_glow::glow::Context>,
     buffer: NativeBuffer,
 }
 
@@ -1502,10 +1640,11 @@ enum DrawType {
     Bitmap(BitmapDraw),
 }
 
-
 struct MsaaBuffers {
-    //color_renderbuffer: NativeRenderbuffer,
-    //stencil_renderbuffer: NativeRenderbuffer,
+    #[cfg(not(target_os = "vita"))]
+    color_renderbuffer: NativeRenderbuffer,
+    #[cfg(not(target_os = "vita"))]
+    stencil_renderbuffer: NativeRenderbuffer,
     render_framebuffer: NativeFramebuffer,
     color_framebuffer: NativeFramebuffer,
     framebuffer_texture: NativeTexture,
@@ -1556,7 +1695,7 @@ enum ShaderUniform {
 
 impl ShaderProgram {
     fn new(
-        gl: &glow::Context,
+        gl: &egui_glow::glow::Context,
         vertex_shader: NativeShader,
         fragment_shader: NativeShader,
     ) -> Result<Self, Error> {
@@ -1574,8 +1713,12 @@ impl ShaderProgram {
                 uniforms[i] = gl.get_uniform_location(program, UNIFORM_NAMES[i]);
             }
 
-            let vertex_position_location = gl.get_attrib_location(program, "position").unwrap_or(0xffff_ffff);
-            let vertex_color_location = gl.get_attrib_location(program, "color").unwrap_or(0xffff_ffff);
+            let vertex_position_location = gl
+                .get_attrib_location(program, "position")
+                .unwrap_or(0xffff_ffff);
+            let vertex_color_location = gl
+                .get_attrib_location(program, "color")
+                .unwrap_or(0xffff_ffff);
             let num_vertex_attributes = if vertex_position_location != 0xffff_ffff {
                 1
             } else {
@@ -1596,25 +1739,25 @@ impl ShaderProgram {
         }
     }
 
-    fn uniform1f(&self, gl: &glow::Context, uniform: ShaderUniform, value: f32) {
+    fn uniform1f(&self, gl: &egui_glow::glow::Context, uniform: ShaderUniform, value: f32) {
         unsafe {
             gl.uniform_1_f32(self.uniforms[uniform as usize].as_ref(), value);
         }
     }
 
-    fn uniform1fv(&self, gl: &glow::Context, uniform: ShaderUniform, values: &[f32]) {
+    fn uniform1fv(&self, gl: &egui_glow::glow::Context, uniform: ShaderUniform, values: &[f32]) {
         unsafe {
             gl.uniform_1_f32_slice(self.uniforms[uniform as usize].as_ref(), values);
         }
     }
 
-    fn uniform1i(&self, gl: &glow::Context, uniform: ShaderUniform, value: i32) {
+    fn uniform1i(&self, gl: &egui_glow::glow::Context, uniform: ShaderUniform, value: i32) {
         unsafe {
             gl.uniform_1_i32(self.uniforms[uniform as usize].as_ref(), value);
         }
     }
 
-    fn uniform4fv(&self, gl: &glow::Context, uniform: ShaderUniform, values: &[f32]) {
+    fn uniform4fv(&self, gl: &egui_glow::glow::Context, uniform: ShaderUniform, values: &[f32]) {
         unsafe {
             gl.uniform_4_f32_slice(self.uniforms[uniform as usize].as_ref(), values);
         }
@@ -1622,7 +1765,7 @@ impl ShaderProgram {
 
     fn uniform_matrix3fv(
         &self,
-        gl: &glow::Context,
+        gl: &egui_glow::glow::Context,
         uniform: ShaderUniform,
         values: &[[f32; 3]; 3],
     ) {
@@ -1637,7 +1780,7 @@ impl ShaderProgram {
 
     fn uniform_matrix4fv(
         &self,
-        gl: &glow::Context,
+        gl: &egui_glow::glow::Context,
         uniform: ShaderUniform,
         values: &[[f32; 4]; 4],
     ) {
@@ -1656,12 +1799,12 @@ trait GlExt {
     fn check_error(&self, error_msg: &'static str) -> Result<(), Error>;
 }
 
-impl GlExt for glow::Context {
+impl GlExt for egui_glow::glow::Context {
     /// Check if GL returned an error for the previous operation.
     fn check_error(&self, error_msg: &'static str) -> Result<(), Error> {
         unsafe {
             match self.get_error() {
-                glow::NO_ERROR => Ok(()),
+                egui_glow::glow::NO_ERROR => Ok(()),
                 error => Err(Error::GLError(error_msg, error)),
             }
         }

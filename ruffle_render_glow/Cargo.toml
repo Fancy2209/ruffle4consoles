@@ -23,8 +23,7 @@ assigning_clones = "allow"       # Sometimes useful, but more often than not it 
 
 [dependencies]
 log = "0.4"
-glow = { git = "https://github.com/grovesNL/glow", branch = "main", features = [] }
-sdl2 = { version = "0.38.0", features = ["use-pkgconfig"] }
+egui_glow = "0.32.3"
 ruffle_render = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", features = ["tessellator"] }
 bytemuck = { version = "1.23.2", features = ["derive"] }
 swf = { git = "https://github.com/ruffle-rs/ruffle", branch = "master" }

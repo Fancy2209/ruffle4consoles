@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sdl2 = { version = "0.38.0", features = ["static-link", "use-pkgconfig"] }
 ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", features = [
     "audio",
     "symphonia",
@@ -17,10 +16,14 @@ ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", 
 ruffle_render = { git = "https://github.com/ruffle-rs/ruffle", branch = "master" }
 ruffle_render_glow = { path = "ruffle_render_glow" }
 anyhow = "1.0"
-glow = { git = "https://github.com/grovesNL/glow", branch = "main", features = [] }
+sdl2 = { version = "0.38.0", features = ["use-pkgconfig", "static-link"] }
+egui-sdl2-event = { path = "./egui-sdl2-event" }
+egui_glow = "0.32.3"
+egui = "0.32.3"
+egui-file-dialog = "0.11.0"
+
 
 [package.metadata.vita]
 title_id = "RUFFLVITA"
 title_name = "Ruffle"
-
-
+assets = "./static/vita"

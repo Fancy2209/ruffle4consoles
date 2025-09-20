@@ -1,6 +1,8 @@
 //#![deny(clippy::unwrap_used)]
-// Remove this when we start using `Rc` when compiling for wasm
+// Remove this when we start using `Arc` when compiling for wasm
 #![allow(clippy::arc_with_non_send_sync)]
+
+//mod context3d;
 
 use bytemuck::{Pod, Zeroable};
 use glow::*;
@@ -23,7 +25,6 @@ use ruffle_render::tessellator::{
 use ruffle_render::transform::Transform;
 use std::any::Any;
 use std::borrow::Cow;
-use std::rc::Rc;
 use std::sync::Arc;
 use swf::{BlendMode, Color, Twips};
 use thiserror::Error;
@@ -103,14 +104,24 @@ impl From<TessVertex> for Vertex {
     }
 }
 
+#[derive(Debug)]
+pub struct QueueSyncHandle {
+    texture: BitmapHandle,
+    bounds: PixelRegion,
+}
+
+impl SyncHandle for QueueSyncHandle {}
+
 pub struct GlowRenderBackend {
     /// glow context
-    gl: Rc<glow::Context>,
+    gl: Arc<glow::Context>,
 
     // The frame buffers used for resolving MSAA.
     msaa_buffers: Option<MsaaBuffers>,
     #[cfg(not(target_os = "vita"))]
     msaa_sample_count: u32,
+
+    offscreen_framebuffer: glow::Framebuffer,
 
     color_program: ShaderProgram,
     bitmap_program: ShaderProgram,
@@ -142,10 +153,10 @@ pub struct GlowRenderBackend {
 
 #[derive(Debug)]
 struct RegistryData {
-    gl: Rc<glow::Context>,
+    gl: Arc<glow::Context>,
     width: u32,
     height: u32,
-    texture: glow::NativeTexture,
+    texture: glow::Texture,
 }
 
 impl Drop for RegistryData {
@@ -166,17 +177,15 @@ const MAX_GRADIENT_COLORS: usize = 15;
 
 impl GlowRenderBackend {
     pub fn new(
-        glow_context: glow::Context,
+        glow_context: Arc<glow::Context>,
         is_transparent: bool,
         #[cfg(not(target_os = "vita"))]
         quality: StageQuality,
         #[cfg(target_os = "vita")]
-        _quality: StageQuality,
-    ) -> Result<Self, Error> {
+        _quality: StageQuality,    ) -> Result<Self, Error> {
         log::info!("Creating glow context.");
         unsafe {
-
-            let gl = Rc::new(glow_context);
+            let gl = glow_context;
 
             // Determine MSAA sample count.
             #[cfg(not(target_os = "vita"))]
@@ -184,9 +193,11 @@ impl GlowRenderBackend {
 
             //// Ensure that we don't exceed the max MSAA of this device.
             #[cfg(not(target_os = "vita"))]
-            if msaa_sample_count > 16 {
-                log::info!("Device only supports 16xMSAA");
-                msaa_sample_count = 16;
+            let max_samples = gl.get_parameter_i32(glow::MAX_SAMPLES) as u32;
+            #[cfg(not(target_os = "vita"))]
+            if max_samples > 0 && max_samples < msaa_sample_count {
+                log::info!("Device only supports {max_samples}xMSAA");
+                msaa_sample_count = max_samples;
             }
 
             let color_vertex = Self::compile_shader(&gl, glow::VERTEX_SHADER, COLOR_VERTEX_GLSL)?;
@@ -208,12 +219,18 @@ impl GlowRenderBackend {
             // Necessary to load RGB textures (alignment defaults to 4).
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
 
+            let offscreen_framebuffer = gl
+                .create_framebuffer()
+                .expect(&Error::UnableToCreateFrameBuffer.to_string());
+
             let mut renderer = Self {
                 gl,
 
                 msaa_buffers: None,
                 #[cfg(not(target_os = "vita"))]
                 msaa_sample_count,
+
+                offscreen_framebuffer,
 
                 color_program,
                 gradient_program,
@@ -357,7 +374,7 @@ impl GlowRenderBackend {
         gl: &glow::Context,
         shader_type: u32,
         glsl_src: &str,
-    ) -> Result<glow::NativeShader, Error> {
+    ) -> Result<glow::Shader, Error> {
         unsafe {
             let shader = gl
                 .create_shader(shader_type)
@@ -385,113 +402,123 @@ impl GlowRenderBackend {
         unsafe {
             let gl = self.gl.as_ref();
 
-        // Delete previous buffers, if they exist.
-        if let Some(msaa_buffers) = self.msaa_buffers.take() {
-            gl.delete_renderbuffer(msaa_buffers.color_renderbuffer);
-            gl.delete_renderbuffer(msaa_buffers.stencil_renderbuffer);
-            gl.delete_framebuffer(msaa_buffers.render_framebuffer);
-            gl.delete_framebuffer(msaa_buffers.color_framebuffer);
-            gl.delete_texture(msaa_buffers.framebuffer_texture);
-        }
+            // Delete previous buffers, if they exist.
+            if let Some(msaa_buffers) = self.msaa_buffers.take() {
+                gl.delete_renderbuffer(msaa_buffers.color_renderbuffer);
+                gl.delete_renderbuffer(msaa_buffers.stencil_renderbuffer);
+                gl.delete_framebuffer(msaa_buffers.render_framebuffer);
+                gl.delete_framebuffer(msaa_buffers.color_framebuffer);
+                gl.delete_texture(msaa_buffers.framebuffer_texture);
+            }
 
-        // Create frame and render buffers.
-        let render_framebuffer = gl
-            .create_framebuffer()
-            .expect(&Error::UnableToCreateFrameBuffer.to_string());
-        let color_framebuffer = gl
-            .create_framebuffer()
-            .expect(&Error::UnableToCreateFrameBuffer.to_string());
+            // Create frame and render buffers.
+            let render_framebuffer = gl
+                .create_framebuffer()
+                .expect(&Error::UnableToCreateFrameBuffer.to_string());
+            let color_framebuffer = gl
+                .create_framebuffer()
+                .expect(&Error::UnableToCreateFrameBuffer.to_string());
 
-        // Note for future self:
-        // Whenever we support playing transparent movies,
-        // switch this to RGBA and probably need to change shaders to all
-        // be premultiplied alpha.
-        let color_renderbuffer = gl
-            .create_renderbuffer()
-            .expect(&Error::UnableToCreateRenderBuffer.to_string());
-        gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color_renderbuffer));
-        gl.renderbuffer_storage_multisample(
-            glow::RENDERBUFFER,
-            self.msaa_sample_count as i32,
-            glow::RGBA8,
-            self.renderbuffer_width,
-            self.renderbuffer_height,
-        );
-        //gl.check_error("renderbuffer_storage_multisample (color)")?;
+            // Note for future self:
+            // Whenever we support playing transparent movies,
+            // switch this to RGBA and probably need to change shaders to all
+            // be premultiplied alpha.
+            let color_renderbuffer = gl
+                .create_renderbuffer()
+                .expect(&Error::UnableToCreateRenderBuffer.to_string());
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color_renderbuffer));
+            gl.renderbuffer_storage_multisample(
+                glow::RENDERBUFFER,
+                self.msaa_sample_count as i32,
+                glow::RGBA8,
+                self.renderbuffer_width,
+                self.renderbuffer_height,
+            );
+            //gl.check_error("renderbuffer_storage_multisample (color)")?;
 
-        let stencil_renderbuffer = gl
-            .create_renderbuffer()
-            .expect(&Error::UnableToCreateFrameBuffer.to_string());
-        gl.bind_renderbuffer(glow::RENDERBUFFER, Some(&stencil_renderbuffer));
-        gl.renderbuffer_storage_multisample(
-            glow::RENDERBUFFER,
-            self.msaa_sample_count as i32,
-            glow::STENCIL_INDEX8,
-            self.renderbuffer_width,
-            self.renderbuffer_height,
-        );
-        //gl.check_error("renderbuffer_storage_multisample (stencil)")?;
+            let stencil_renderbuffer = gl
+                .create_renderbuffer()
+                .expect(&Error::UnableToCreateFrameBuffer.to_string());
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(stencil_renderbuffer));
+            gl.renderbuffer_storage_multisample(
+                glow::RENDERBUFFER,
+                self.msaa_sample_count as i32,
+                glow::STENCIL_INDEX8,
+                self.renderbuffer_width,
+                self.renderbuffer_height,
+            );
+            //gl.check_error("renderbuffer_storage_multisample (stencil)")?;
 
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(render_framebuffer));
-        gl.framebuffer_renderbuffer(
-            glow::FRAMEBUFFER,
-            glow::COLOR_ATTACHMENT0,
-            glow::RENDERBUFFER,
-            Some(color_renderbuffer),
-        );
-        gl.framebuffer_renderbuffer(
-            glow::FRAMEBUFFER,
-            glow::STENCIL_ATTACHMENT,
-            glow::RENDERBUFFER,
-            Some(stencil_renderbuffer),
-        );
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(render_framebuffer));
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::RENDERBUFFER,
+                Some(color_renderbuffer),
+            );
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(stencil_renderbuffer),
+            );
 
-        let framebuffer_texture = gl.create_texture().ok_or(Error::UnableToCreateTexture)?;
-        gl.bind_texture(glow::TEXTURE_2D, Some(&framebuffer_texture));
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_S,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_T,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_image_2d(
-            glow::TEXTURE_2D,
-            0,
-            glow::RGBA as i32,
-            self.renderbuffer_width,
-            self.renderbuffer_height,
-            0,
-            glow::RGBA,
-            glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(None),
-        );
-        gl.bind_texture(glow::TEXTURE_2D, None);
+            let framebuffer_texture = gl
+                .create_texture()
+                .expect(&Error::UnableToCreateTexture.to_string());
+            gl.bind_texture(glow::TEXTURE_2D, Some(framebuffer_texture));
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_S,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_T,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA as i32,
+                self.renderbuffer_width,
+                self.renderbuffer_height,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
+            );
+            gl.bind_texture(glow::TEXTURE_2D, None);
 
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(color_framebuffer));
-        gl.framebuffer_texture_2d(
-            glow::FRAMEBUFFER,
-            glow::COLOR_ATTACHMENT0,
-            glow::TEXTURE_2D,
-            Some(&framebuffer_texture),
-            0,
-        );
-        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(color_framebuffer));
+            gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                Some(framebuffer_texture),
+                0,
+            );
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
-        self.msaa_buffers = Some(MsaaBuffers {
-            color_renderbuffer,
-            stencil_renderbuffer,
-            render_framebuffer,
-            color_framebuffer,
-            framebuffer_texture,
-        });
+            self.msaa_buffers = Some(MsaaBuffers {
+                color_renderbuffer,
+                stencil_renderbuffer,
+                render_framebuffer,
+                color_framebuffer,
+                framebuffer_texture,
+            });
 
-        Ok(())
+            Ok(())
         }
     }
 
@@ -636,7 +663,7 @@ impl GlowRenderBackend {
     }
 
     /// Creates and binds a new VAO.
-    fn create_vertex_array(&self) -> Result<NativeVertexArray, Error> {
+    fn create_vertex_array(&self) -> Result<glow::VertexArray, Error> {
         unsafe {
             let vao = self.gl.create_vertex_array().unwrap();
             self.gl.bind_vertex_array(Some(vao));
@@ -645,7 +672,7 @@ impl GlowRenderBackend {
     }
 
     /// Binds a VAO.
-    fn bind_vertex_array(&self, vao: Option<NativeVertexArray>) {
+    fn bind_vertex_array(&self, vao: Option<glow::VertexArray>) {
         unsafe {
             self.gl.bind_vertex_array(vao);
         }
@@ -730,6 +757,7 @@ impl GlowRenderBackend {
 
             self.gl
                 .viewport(0, 0, self.renderbuffer_width, self.renderbuffer_height);
+            self.gl.disable(glow::DEPTH_TEST);
 
             self.set_stencil_state();
             if self.is_transparent {
@@ -778,8 +806,12 @@ impl GlowRenderBackend {
                 // Render the resolved framebuffer texture to a quad on the screen.
                 gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
-                self.gl
-                    .viewport(0, 0, self.renderbuffer_width as i32, self.renderbuffer_height);
+                self.gl.viewport(
+                    0,
+                    0,
+                    self.renderbuffer_width as i32,
+                    self.renderbuffer_height,
+                );
 
                 let program = &self.bitmap_program;
                 self.gl.use_program(Some(program.program));
@@ -927,12 +959,82 @@ fn same_blend_mode(first: Option<&RenderBlendMode>, second: &RenderBlendMode) ->
 impl RenderBackend for GlowRenderBackend {
     fn render_offscreen(
         &mut self,
-        _handle: BitmapHandle,
-        _commands: CommandList,
+        handle: BitmapHandle,
+        commands: CommandList,
         _quality: StageQuality,
-        _bounds: PixelRegion,
+        bounds: PixelRegion,
     ) -> Option<Box<dyn SyncHandle>> {
-        None
+        let entry = &as_registry_data(&handle);
+
+        self.active_program = std::ptr::null();
+        self.mask_state = MaskState::NoMask;
+        self.num_masks = 0;
+        self.mask_state_dirty = true;
+
+        self.mult_color = None;
+        self.add_color = None;
+        unsafe {
+            self.gl
+                .bind_framebuffer(glow::FRAMEBUFFER, Some(self.offscreen_framebuffer));
+
+            self.gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                Some(entry.texture),
+                0,
+            );
+
+            if self.gl.check_framebuffer_status(glow::FRAMEBUFFER) != glow::FRAMEBUFFER_COMPLETE {
+                panic!("can't read from framebuffer")
+            }
+
+            self.gl
+                .viewport(0, 0, entry.width as i32, entry.height as i32);
+
+            //self.set_viewport_dimensions(self.offscreen_width as u32, self.offscreen_height as u32);
+            self.view_matrix = [
+                // note: un-flipped Y
+                [1.0 / (entry.width as f32 / 2.0), 0.0, 0.0, 0.0],
+                [0.0, 1.0 / (entry.height as f32 / 2.0), 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [-1.0, -1.0, 0.0, 1.0],
+            ];
+
+            self.set_stencil_state();
+            // TODO: clearColor() based on alpha/transparency
+            self.gl.stencil_mask(0xff);
+            self.gl.clear(glow::STENCIL_BUFFER_BIT); // is this needed?
+
+            commands.execute(self);
+
+            // HACK: restore viewport here
+            //self.set_viewport_dimensions(self.renderbuffer_width as u32, self.renderbuffer_height as u32);
+            self.view_matrix = [
+                [1.0 / (self.renderbuffer_width as f32 / 2.0), 0.0, 0.0, 0.0],
+                [
+                    0.0,
+                    -1.0 / (self.renderbuffer_height as f32 / 2.0),
+                    0.0,
+                    0.0,
+                ],
+                [0.0, 0.0, 1.0, 0.0],
+                [-1.0, 1.0, 0.0, 1.0],
+            ];
+
+            self.gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                None,
+                0,
+            );
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        }
+        Some(Box::new(QueueSyncHandle {
+            texture: handle,
+            bounds,
+        }))
     }
 
     fn viewport_dimensions(&self) -> ViewportDimensions {
@@ -1114,12 +1216,49 @@ impl RenderBackend for GlowRenderBackend {
 
     fn resolve_sync_handle(
         &mut self,
-        _handle: Box<dyn SyncHandle>,
-        _with_rgba: RgbaBufRead,
+        handle: Box<dyn SyncHandle>,
+        with_rgba: RgbaBufRead,
     ) -> Result<(), ruffle_render::error::Error> {
-        Err(ruffle_render::error::Error::Unimplemented(
-            "Sync handle resolution".into(),
-        ))
+        let handle = Box::<dyn Any>::downcast::<QueueSyncHandle>(handle).unwrap();
+
+        let entry = &as_registry_data(&handle.texture);
+        unsafe {
+            self.gl
+                .bind_framebuffer(glow::FRAMEBUFFER, Some(self.offscreen_framebuffer));
+
+            self.gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                Some(entry.texture),
+                0,
+            );
+
+            let sz = ((entry.width * entry.height) as usize) * 4;
+            let mut pixels: Vec<u8> = vec![0; sz]; // TODO uninitialized?
+            self.gl.read_pixels(
+                handle.bounds.x_min as i32,
+                handle.bounds.y_min as i32,
+                handle.bounds.x_max as i32,
+                handle.bounds.y_max as i32,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                PixelPackData::Slice(Some(&mut pixels)),
+            ); // TODO `?`;
+
+            self.gl.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                None,
+                0,
+            );
+
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            with_rgba(&pixels, entry.width * 4);
+        }
+
+        Ok(())
     }
 
     fn run_pixelbender_shader(
@@ -1569,7 +1708,7 @@ struct BitmapDraw {
 
 #[derive(Debug)]
 struct Mesh {
-    gl2: Rc<glow::Context>,
+    gl2: Arc<glow::Context>,
     draws: Vec<Draw>,
 }
 
@@ -1591,8 +1730,8 @@ fn as_mesh(handle: &ShapeHandle) -> &Mesh {
 
 #[derive(Debug)]
 struct Buffer {
-    gl: Rc<glow::Context>,
-    buffer: NativeBuffer,
+    gl: Arc<glow::Context>,
+    buffer: glow::Buffer,
 }
 
 impl Drop for Buffer {
@@ -1610,7 +1749,7 @@ struct Draw {
     vertex_buffer: Buffer,
     #[expect(dead_code)]
     index_buffer: Buffer,
-    vao: NativeVertexArray,
+    vao: glow::VertexArray,
     num_indices: i32,
     num_mask_indices: i32,
 }
@@ -1622,23 +1761,22 @@ enum DrawType {
     Bitmap(BitmapDraw),
 }
 
-
 struct MsaaBuffers {
     #[cfg(not(target_os = "vita"))]
-    color_renderbuffer: NativeRenderbuffer,
+    color_renderbuffer: glow::Renderbuffer,
     #[cfg(not(target_os = "vita"))]
-    stencil_renderbuffer: NativeRenderbuffer,
-    render_framebuffer: NativeFramebuffer,
-    color_framebuffer: NativeFramebuffer,
-    framebuffer_texture: NativeTexture,
+    stencil_renderbuffer: glow::Renderbuffer,
+    render_framebuffer: glow::Framebuffer,
+    color_framebuffer: glow::Framebuffer,
+    framebuffer_texture: glow::Texture,
 }
 
 // Because the shaders are currently simple and few in number, we are using a
 // straightforward shader model. We maintain an enum of every possible uniform,
 // and each shader tries to grab the location of each uniform.
 struct ShaderProgram {
-    program: NativeProgram,
-    uniforms: [Option<NativeUniformLocation>; NUM_UNIFORMS],
+    program: glow::Program,
+    uniforms: [Option<glow::UniformLocation>; NUM_UNIFORMS],
     vertex_position_location: u32,
     vertex_color_location: u32,
     num_vertex_attributes: u32,
@@ -1679,8 +1817,8 @@ enum ShaderUniform {
 impl ShaderProgram {
     fn new(
         gl: &glow::Context,
-        vertex_shader: NativeShader,
-        fragment_shader: NativeShader,
+        vertex_shader: glow::Shader,
+        fragment_shader: glow::Shader,
     ) -> Result<Self, Error> {
         unsafe {
             let program = gl.create_program().unwrap();
@@ -1688,16 +1826,19 @@ impl ShaderProgram {
             gl.attach_shader(program, fragment_shader);
 
             gl.link_program(program);
-            log::info!("{}", gl.get_program_info_log(program));
 
             // Find uniforms.
-            let mut uniforms: [Option<NativeUniformLocation>; NUM_UNIFORMS] = Default::default();
+            let mut uniforms: [Option<glow::UniformLocation>; NUM_UNIFORMS] = Default::default();
             for i in 0..NUM_UNIFORMS {
                 uniforms[i] = gl.get_uniform_location(program, UNIFORM_NAMES[i]);
             }
 
-            let vertex_position_location = gl.get_attrib_location(program, "position").unwrap_or(0xffff_ffff);
-            let vertex_color_location = gl.get_attrib_location(program, "color").unwrap_or(0xffff_ffff);
+            let vertex_position_location = gl
+                .get_attrib_location(program, "position")
+                .unwrap_or(0xffff_ffff);
+            let vertex_color_location = gl
+                .get_attrib_location(program, "color")
+                .unwrap_or(0xffff_ffff);
             let num_vertex_attributes = if vertex_position_location != 0xffff_ffff {
                 1
             } else {

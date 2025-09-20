@@ -1,2 +1,5 @@
 [target.aarch64-nintendo-switch]
 rustflags = ['--cfg', 'getrandom_backend="rndr"']
+
+[build]
+rustflags = ["-Zthreads=16"]

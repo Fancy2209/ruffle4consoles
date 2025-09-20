@@ -1,23 +1,45 @@
-mod log;
 mod audio;
+mod log;
 
 use std::collections::HashMap;
+use std::fs::File;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Instant;
 
+use crate::audio::SdlAudioBackend;
+use crate::log::ConsoleLogBackend;
 use anyhow::anyhow;
-use log::ConsoleLogBackend;
+use ron::de::from_reader;
+use ron::from_str;
 use ruffle_core::config::Letterbox;
-use ruffle_core::events::{GamepadButton, KeyCode, MouseButton};
+use ruffle_core::events::{GamepadButton, KeyCode, MouseButton, ParseEnumError};
 use ruffle_core::limits::ExecutionLimit;
 use ruffle_core::tag_utils::SwfMovie;
 use ruffle_core::{PlayerBuilder, PlayerEvent, ViewportDimensions};
 use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
+use sdl2::controller::Axis;
+use serde::Deserialize;
 
-#[cfg(target_os = "horizon")]
-use sdl2::libc;
+#[cfg(any(target_os = "horizon", target_os = "vita"))]
+use core::ffi::c_void;
 
-use crate::audio::SdlAudioBackend;
+#[cfg(target_os = "vita")]
+type SceGxmMultisampleMode = u32;
+#[cfg(target_os = "vita")]
+pub const SCE_GXM_MULTISAMPLE_NONE: SceGxmMultisampleMode = 0;
+#[cfg(target_os = "vita")]
+pub const SCE_GXM_MULTISAMPLE_2X: SceGxmMultisampleMode = 1;
+#[cfg(target_os = "vita")]
+pub const SCE_GXM_MULTISAMPLE_4X: SceGxmMultisampleMode = 2;
+
+//#[cfg(target_os = "vita")]
+//static VGL_MODE_SHADER_PAIR:u32 = 0;
+//#[cfg(target_os = "vita")]
+//static VGL_MODE_GLOBAL:u32 = 1;
+#[cfg(target_os = "vita")]
+static VGL_MODE_POSTPONED: u32 = 2;
 
 #[cfg(target_os = "vita")]
 #[link(name = "SDL2", kind = "static")]
@@ -30,22 +52,99 @@ use crate::audio::SdlAudioBackend;
 #[link(name = "taihen_stub", kind = "static")]
 #[link(name = "SceKernelDmacMgr_stub", kind = "static")]
 #[link(name = "SceIme_stub", kind = "static")]
-unsafe extern "C" {}
+unsafe extern "C" {
+    pub fn vglInitWithCustomThreshold(
+        pool_size: i32,
+        width: i32,
+        height: i32,
+        ram_reteshold: i32,
+        cdram_threshold: i32,
+        phycont_threshold: i32,
+        cdlg_threshold: i32,
+        msaa: SceGxmMultisampleMode,
+    ) -> bool;
+    pub fn vglSetSemanticBindingMode(mode: u32);
+    //pub fn vglCalloc(nobj: usize, size: usize) -> *mut c_void;
+    //pub fn vglFree(p: *mut c_void);
+    //pub fn vglMalloc(size: usize) -> *mut c_void;
+    //pub fn vglMemalign(align: usize, size: usize) -> *mut c_void;
+    //pub fn vglRealloc(p: *mut c_void, size: usize) -> *mut c_void;
+    //pub fn sceClibMemcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
+    //pub fn sceClibMemset(dest: *mut c_void, c: i32, n: usize) -> *mut c_void;
+}
+
+/* 
+#[cfg(target_os = "vita")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __wrap_calloc(nobj: usize, size: usize) -> *mut c_void {
+    unsafe { vglCalloc(nobj, size) }
+}
+
+#[cfg(target_os = "vita")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __wrap_free(p: *mut c_void) {
+    unsafe { vglFree(p) };
+}
+
+#[cfg(target_os = "vita")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __wrap_malloc(size: usize) -> *mut c_void {
+    unsafe { vglMalloc(size) }
+}
+
+#[cfg(target_os = "vita")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __wrap_memalign(align: usize, size: usize) -> *mut c_void {
+    unsafe { vglMemalign(align, size) }
+}
+
+#[cfg(target_os = "vita")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __wrap_realloc(p: *mut c_void, size: usize) -> *mut c_void {
+    unsafe { vglRealloc(p, size) }
+}
+
+#[cfg(target_os = "vita")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __wrap_memcpy(
+    dest: *mut c_void,
+    src: *const c_void,
+    n: usize,
+) -> *mut c_void {
+    unsafe { sceClibMemcpy(dest, src, n) }
+}
+
+#[cfg(target_os = "vita")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __wrap_memset(dest: *mut c_void, c: i32, n: usize) -> *mut c_void {
+    unsafe { sceClibMemset(dest, c, n) }
+}*/
+
+#[cfg(target_os = "vita")]
+#[used]
+#[unsafe(export_name = "_newlib_heap_size_user")]
+pub static _NEWLIB_HEAP_SIZE_USER: u32 = 246 * 1024 * 1024;
 
 #[cfg(target_os = "horizon")]
 unsafe extern "C" {
-    pub fn randomGet(buf: *mut libc::c_void, len: libc::size_t);
+    pub fn randomGet(buf: *mut c_void, len: usize);
     pub fn appletGetDefaultDisplayResolution(width: *mut i32, height: *mut i32) -> u32;
 }
 
 #[cfg(target_os = "horizon")]
+static _SC_PAGESIZE: i32 = 30;
+
+#[cfg(target_os = "horizon")]
+static GRND_RANDOM: u32 = 0x2;
+
+#[cfg(target_os = "horizon")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn getrandom(
-    buf: *mut libc::c_void,
-    mut buflen: libc::size_t,
-    flags: libc::c_uint,
-) -> libc::ssize_t {
-    let maxlen = if flags & libc::GRND_RANDOM != 0 {
+    buf: *mut c_void,
+    mut buflen: usize,
+    flags: u32,
+) -> isize {
+    let maxlen = if flags & GRND_RANDOM != 0 {
         512
     } else {
         0x1FF_FFFF
@@ -54,13 +153,13 @@ pub unsafe extern "C" fn getrandom(
     unsafe {
         randomGet(buf, buflen);
     }
-    buflen as libc::ssize_t
+    buflen as isize
 }
 
 #[cfg(target_os = "horizon")]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sysconf(name: i32) -> libc::c_long {
-    if name == libc::_SC_PAGESIZE {
+pub unsafe extern "C" fn sysconf(name: i32) -> i64 {
+    if name == _SC_PAGESIZE {
         return 4096;
     } else {
         return -1;
@@ -81,18 +180,126 @@ pub fn get_default_display_resolution() -> Result<(u32, u32), u32> {
     }
 }
 
+pub struct AxisState {
+    pub up: bool,
+    pub down: bool,
+    pub left: bool,
+    pub right: bool,
+}
+
+impl Default for AxisState {
+    fn default() -> Self {
+        AxisState {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+        }
+    }
+}
+
+#[cfg(target_os = "vita")]
+const BASE_PATH: &str = "ux0:data/ruffle";
+
+#[cfg(target_os = "horizon")]
+const BASE_PATH: &str = "/ruffle";
+
+#[cfg(not(any(target_os = "horizon", target_os = "vita")))]
+const BASE_PATH: &str = "./ruffle";
+
+const CONFIG: &str = "
+Config(
+    gamepad_config: {},
+)";
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    gamepad_config: HashMap<String, u32>,
+    swf_url: Option<String>,
+    swf_name: Option<String>,
+}
+
+fn load_config() -> Result<
+    (
+        HashMap<GamepadButton, KeyCode>,
+        Option<String>,
+        Option<String>,
+    ),
+    ParseEnumError,
+> {
+    let config_file = format!("{}/config.ron", BASE_PATH);
+    let config_file_clone = config_file.clone();
+    let f = File::open(config_file);
+    if f.is_ok() {
+        let config: Config = match from_reader(f.unwrap()) {
+            Ok(x) => x,
+            Err(e) => {
+                println!("Couldn't load config file:{}", config_file_clone);
+                println!("{}", e);
+                from_str(CONFIG).unwrap()
+            }
+        };
+        let mut gamepad_button_mapping: HashMap<GamepadButton, KeyCode> = HashMap::new();
+        for (button, key) in config.gamepad_config.into_iter() {
+            gamepad_button_mapping
+                .insert(GamepadButton::from_str(&button)?, KeyCode::from_code(key));
+        }
+        Ok((gamepad_button_mapping, config.swf_name, config.swf_url))
+    } else {
+        println!("Couldn't load config file:{}", config_file_clone);
+        let config: Config = from_str(CONFIG).unwrap();
+        let mut gamepad_button_mapping: HashMap<GamepadButton, KeyCode> = HashMap::new();
+        for (button, key) in config.gamepad_config.into_iter() {
+            gamepad_button_mapping
+                .insert(GamepadButton::from_str(&button)?, KeyCode::from_code(key));
+        }
+        Ok((gamepad_button_mapping, config.swf_name, config.swf_url))
+    }
+}
+
 fn main() {
+    sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
+    sdl2::hint::set("VITA_DISABLE_TOUCH_FRONT", "1");
+    sdl2::hint::set("VITA_DISABLE_TOUCH_BACK", "1");
+
+    let mut axis_state = AxisState::default();
     let sdl2_context = sdl2::init().unwrap();
     let sdl2_video = sdl2_context.video().unwrap();
     let sdl2_game_controller = sdl2_context.game_controller().unwrap();
     let sdl2_joystick = sdl2_context.joystick().unwrap();
 
+    // SDL2's default vitaGL config isn't ideal, so we gotta get a little unsafe
+    #[cfg(target_os = "vita")]
+    unsafe {
+        vglInitWithCustomThreshold(
+            0,
+            960,
+            544,
+            8 * 1024 * 1024,
+            0,
+            0,
+            0,
+            SCE_GXM_MULTISAMPLE_2X,
+        );
+        vglSetSemanticBindingMode(VGL_MODE_POSTPONED);
+    }
+
     let gl_attr = sdl2_video.gl_attr();
     gl_attr.set_context_profile(sdl2::video::GLProfile::GLES);
     gl_attr.set_context_version(2, 0);
+    let _ = sdl2_video.gl_set_swap_interval(0);
+
+    let config = match load_config() {
+        Ok(x) => x,
+        Err(_e) => {
+            println!("Couldn't load default config");
+            std::process::exit(1);
+        }
+    };
+
+    let (gamepad_button_mapping, swf_name, swf_url) = config;
 
     let mut controllers: Vec<sdl2::controller::GameController> = Vec::new();
-    println!("{}", sdl2_joystick.num_joysticks().unwrap());
     for i in 0..sdl2_joystick.num_joysticks().unwrap() {
         if sdl2_game_controller.is_game_controller(i) {
             controllers.push(sdl2_game_controller.open(i).unwrap());
@@ -103,7 +310,7 @@ fn main() {
 
     #[cfg(target_os = "vita")]
     let mut dimensions = ViewportDimensions {
-        width: 940,
+        width: 960,
         height: 544,
         scale_factor: 1.0,
     };
@@ -135,30 +342,33 @@ fn main() {
 
     let gl_context = sdl2_window.gl_create_context().unwrap();
     let _ = sdl2_window.gl_make_current(&gl_context);
+    let swf_name = if swf_name.is_some() {
+        swf_name.unwrap()
+    } else {
+        "movie.swf".into()
+    };
+    let swf_url = if swf_url.is_some() {
+        swf_url.unwrap()
+    } else {
+        "file:///movie.swf".into()
+    };
 
-    let bytes = include_bytes!("movie.swf");
-
-    let movie = SwfMovie::from_data(bytes, "./movie.swf".to_string(), None)
+    let swf_data = std::fs::read(format!("{}/{}", BASE_PATH, swf_name));
+    let movie = SwfMovie::from_data(&swf_data.unwrap(), swf_url.into(), None)
         .map_err(|e| anyhow!(e.to_string()));
+
+    if movie.is_err() {
+        println!("Couldn't load {}", format!("{}/{}", BASE_PATH, swf_name));
+        std::process::exit(1);
+    }
     let log = ConsoleLogBackend::default();
 
     // Glow can only realistically be used in vita and horizon, need
-    let context: glow::Context;
-    unsafe {
-        context =
-            glow::Context::from_loader_function(|s| sdl2_video.gl_get_proc_address(s) as *const _);
-    }
+    let context = Arc::new(unsafe {
+        glow::Context::from_loader_function(|s| sdl2_video.gl_get_proc_address(s) as *const _)
+    });
     let renderer = GlowRenderBackend::new(context, false, StageQuality::High).unwrap();
     let audio = SdlAudioBackend::new(sdl2_context.audio().unwrap()).unwrap();
-    let gamepad_button_mapping: HashMap<GamepadButton, KeyCode> = HashMap::from([
-        (GamepadButton::DPadUp, KeyCode::UP),
-        (GamepadButton::DPadDown, KeyCode::DOWN),
-        (GamepadButton::DPadLeft, KeyCode::LEFT),
-        (GamepadButton::DPadRight, KeyCode::RIGHT),
-        (GamepadButton::South, KeyCode::S),
-        (GamepadButton::West, KeyCode::A),
-        (GamepadButton::East, KeyCode::UP),
-    ]);
 
     let player = PlayerBuilder::new()
         .with_log(log.clone())
@@ -166,6 +376,7 @@ fn main() {
         .with_audio(audio)
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
+        .with_scale_mode(ruffle_core::StageScaleMode::ShowAll, true)
         .with_fullscreen(true)
         .with_letterbox(Letterbox::On)
         .with_gamepad_button_mapping(gamepad_button_mapping)
@@ -217,7 +428,6 @@ fn main() {
                     which: _,
                     button,
                 } => {
-                    println!("{}", button.string());
                     let ruffle_button = sdl_gamepadbutton_to_ruffle(button);
                     if let Some(ruffle_button) = ruffle_button {
                         player
@@ -233,7 +443,6 @@ fn main() {
                     which: _,
                     button,
                 } => {
-                    println!("{}", button.string());
                     let ruffle_button = sdl_gamepadbutton_to_ruffle(button);
                     if let Some(ruffle_button) = ruffle_button {
                         player
@@ -313,6 +522,89 @@ fn main() {
                         y: y as f64 * dimensions.height as f64,
                         button: MouseButton::Left,
                     });
+                }
+                sdl2::event::Event::ControllerAxisMotion {
+                    timestamp: _,
+                    which: _,
+                    axis,
+                    value,
+                } => {
+                    let x_axis = axis == Axis::LeftX;
+                    let y_axis = axis == Axis::LeftY;
+                    let deadzone = 8000;
+                    let left = if x_axis {
+                        value < -deadzone
+                    } else {
+                        axis_state.left
+                    };
+                    let right = if x_axis {
+                        value > deadzone
+                    } else {
+                        axis_state.right
+                    };
+                    let up = if y_axis {
+                        value < -deadzone
+                    } else {
+                        axis_state.up
+                    };
+                    let down = if y_axis {
+                        value > deadzone
+                    } else {
+                        axis_state.down
+                    };
+
+                    if up != axis_state.up {
+                        let event_up = if up {
+                            PlayerEvent::GamepadButtonDown {
+                                button: GamepadButton::DPadUp,
+                            }
+                        } else {
+                            PlayerEvent::GamepadButtonUp {
+                                button: GamepadButton::DPadUp,
+                            }
+                        };
+                        axis_state.up = up;
+                        player.lock().unwrap().handle_event(event_up);
+                    }
+                    if down != axis_state.down {
+                        let event_down = if down {
+                            PlayerEvent::GamepadButtonDown {
+                                button: GamepadButton::DPadDown,
+                            }
+                        } else {
+                            PlayerEvent::GamepadButtonUp {
+                                button: GamepadButton::DPadDown,
+                            }
+                        };
+                        axis_state.down = down;
+                        player.lock().unwrap().handle_event(event_down);
+                    }
+                    if left != axis_state.left {
+                        let event_left = if left {
+                            PlayerEvent::GamepadButtonDown {
+                                button: GamepadButton::DPadLeft,
+                            }
+                        } else {
+                            PlayerEvent::GamepadButtonUp {
+                                button: GamepadButton::DPadLeft,
+                            }
+                        };
+                        axis_state.left = left;
+                        player.lock().unwrap().handle_event(event_left);
+                    }
+                    if right != axis_state.right {
+                        let event_right = if right {
+                            PlayerEvent::GamepadButtonDown {
+                                button: GamepadButton::DPadRight,
+                            }
+                        } else {
+                            PlayerEvent::GamepadButtonUp {
+                                button: GamepadButton::DPadRight,
+                            }
+                        };
+                        axis_state.right = right;
+                        player.lock().unwrap().handle_event(event_right);
+                    }
                 }
                 _ => {}
             }

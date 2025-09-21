@@ -121,6 +121,8 @@ pub struct GlowRenderBackend {
     #[cfg(not(target_os = "vita"))]
     msaa_sample_count: u32,
 
+    max_texture_size: u32,
+
     offscreen_framebuffer: glow::Framebuffer,
 
     color_program: ShaderProgram,
@@ -179,10 +181,9 @@ impl GlowRenderBackend {
     pub fn new(
         glow_context: Arc<glow::Context>,
         is_transparent: bool,
-        #[cfg(not(target_os = "vita"))]
-        quality: StageQuality,
-        #[cfg(target_os = "vita")]
-        _quality: StageQuality,    ) -> Result<Self, Error> {
+        #[cfg(not(target_os = "vita"))] quality: StageQuality,
+        #[cfg(target_os = "vita")] _quality: StageQuality,
+    ) -> Result<Self, Error> {
         log::info!("Creating glow context.");
         unsafe {
             let gl = glow_context;
@@ -199,6 +200,8 @@ impl GlowRenderBackend {
                 log::info!("Device only supports {max_samples}xMSAA");
                 msaa_sample_count = max_samples;
             }
+
+            let max_texture_size = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE) as u32;
 
             let color_vertex = Self::compile_shader(&gl, glow::VERTEX_SHADER, COLOR_VERTEX_GLSL)?;
             let texture_vertex =
@@ -229,6 +232,8 @@ impl GlowRenderBackend {
                 msaa_buffers: None,
                 #[cfg(not(target_os = "vita"))]
                 msaa_sample_count,
+
+                max_texture_size,
 
                 offscreen_framebuffer,
 
@@ -659,6 +664,55 @@ impl GlowRenderBackend {
             }
 
             Ok(draws)
+        }
+    }
+
+    fn clamp_bitmap(&mut self, bitmap: &mut Bitmap, format: u32) -> bool {
+        let max_size = self.max_texture_size;
+        if bitmap.width() > max_size || bitmap.height() > max_size {
+            let ratio = bitmap.width() as f32 / bitmap.height() as f32;
+            let mut width = bitmap.width();
+            let mut height = bitmap.height();
+            if width > max_size {
+                width = max_size;
+                height = (max_size as f32 / ratio) as u32;
+            }
+            if height > max_size {
+                height = max_size;
+                width = (max_size as f32 * ratio) as u32;
+            }
+            if format == glow::RGBA {
+                let image = image::RgbaImage::from_raw(
+                    bitmap.width(),
+                    bitmap.height(),
+                    bitmap.data().to_vec(),
+                )
+                .expect("Width and height of bitmap must match bitmap data");
+                let resized = image::imageops::resize(
+                    &image,
+                    width,
+                    height,
+                    image::imageops::FilterType::CatmullRom,
+                );
+                *bitmap = Bitmap::new(width, height, BitmapFormat::Rgba, resized.into_raw());
+            } else {
+                let image = image::RgbImage::from_raw(
+                    bitmap.width(),
+                    bitmap.height(),
+                    bitmap.data().to_vec(),
+                )
+                .expect("Width and height of bitmap must match bitmap data");
+                let resized = image::imageops::resize(
+                    &image,
+                    width,
+                    height,
+                    image::imageops::FilterType::CatmullRom,
+                );
+                *bitmap = Bitmap::new(width, height, BitmapFormat::Rgb, resized.into_raw());
+            }
+            true
+        } else {
+            false
         }
     }
 
@@ -1107,10 +1161,11 @@ impl RenderBackend for GlowRenderBackend {
 
     fn register_bitmap(&mut self, bitmap: Bitmap<'_>) -> Result<BitmapHandle, BitmapError> {
         unsafe {
-            let (format, bitmap) = match bitmap.format() {
+            let (format, mut bitmap) = match bitmap.format() {
                 BitmapFormat::Rgb | BitmapFormat::Yuv420p => (glow::RGB, bitmap.to_rgb()),
                 BitmapFormat::Rgba | BitmapFormat::Yuva420p => (glow::RGBA, bitmap.to_rgba()),
             };
+            self.clamp_bitmap(&mut bitmap, format);
             let texture = self.gl.create_texture().expect("Unable to create texture");
             self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             self.gl.tex_image_2d(
@@ -1160,24 +1215,30 @@ impl RenderBackend for GlowRenderBackend {
         &mut self,
         handle: &BitmapHandle,
         bitmap: Bitmap<'_>,
-        _region: PixelRegion,
+        mut region: PixelRegion,
     ) -> Result<(), BitmapError> {
         unsafe {
             let texture = as_registry_data(handle).texture;
 
             self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
-            let (format, bitmap) = match bitmap.format() {
+            let (format, mut bitmap) = match bitmap.format() {
                 BitmapFormat::Rgb | BitmapFormat::Yuv420p => (glow::RGB, bitmap.to_rgb()),
                 BitmapFormat::Rgba | BitmapFormat::Yuva420p => (glow::RGBA, bitmap.to_rgba()),
             };
+
+            if self.clamp_bitmap(&mut bitmap, format) {
+                // If we're updating a resized texture, just redo the whole thing.
+                // We can't trivially map pixel regions as we use a filter to resize.
+                region = PixelRegion::for_whole_size(bitmap.width(), bitmap.height());
+            }
 
             self.gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
                 format as i32,
-                bitmap.width() as i32,
-                bitmap.height() as i32,
+                region.width() as i32,
+                region.height() as i32,
                 0,
                 format,
                 glow::UNSIGNED_BYTE,

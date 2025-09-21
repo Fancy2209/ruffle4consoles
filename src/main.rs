@@ -22,7 +22,8 @@ use ruffle_render_glow::GlowRenderBackend;
 use sdl2::controller::Axis;
 use serde::Deserialize;
 
-#[cfg(any(target_os = "horizon", target_os = "vita"))]
+//#[cfg(any(target_os = "vita", target_os = "horizon"))]
+#[cfg(target_os = "horizon")]
 use core::ffi::c_void;
 
 #[cfg(target_os = "vita")]
@@ -64,6 +65,9 @@ unsafe extern "C" {
         msaa: SceGxmMultisampleMode,
     ) -> bool;
     pub fn vglSetSemanticBindingMode(mode: u32);
+    pub fn vglSetParamBufferSize(size: u32);
+    pub fn vglUseCachedMem(r#use: bool);
+    pub fn vglUseTripleBuffering(usage: bool);
     //pub fn vglCalloc(nobj: usize, size: usize) -> *mut c_void;
     //pub fn vglFree(p: *mut c_void);
     //pub fn vglMalloc(size: usize) -> *mut c_void;
@@ -73,7 +77,7 @@ unsafe extern "C" {
     //pub fn sceClibMemset(dest: *mut c_void, c: i32, n: usize) -> *mut c_void;
 }
 
-/* 
+/*
 #[cfg(target_os = "vita")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __wrap_calloc(nobj: usize, size: usize) -> *mut c_void {
@@ -120,10 +124,20 @@ pub unsafe extern "C" fn __wrap_memset(dest: *mut c_void, c: i32, n: usize) -> *
     unsafe { sceClibMemset(dest, c, n) }
 }*/
 
-#[cfg(target_os = "vita")]
-#[used]
-#[unsafe(export_name = "_newlib_heap_size_user")]
-pub static _NEWLIB_HEAP_SIZE_USER: u32 = 246 * 1024 * 1024;
+//#[cfg(target_os = "vita")]
+//#[used]
+//#[unsafe(export_name = "sceUserMainThreadStackSize")]
+//pub static SCE_USER_MAIN_THREAD_STACK_SIZE: u32 = 1 * 1024 * 1024; // 1 MiB
+
+//#[cfg(target_os = "vita")]
+//#[used]
+//#[unsafe(export_name = "sceLibcHeapSize")]
+//pub static SCE_LIBC_HEAP_SIZE: u32 = 10 * 1024 * 1024; // 10 MiB
+
+//#[cfg(target_os = "vita")]
+//#[used]
+//#[unsafe(export_name = "_newlib_heap_size_user")]
+//pub static _NEWLIB_HEAP_SIZE_USER: u32 = 246 * 1024 * 1024;
 
 #[cfg(target_os = "horizon")]
 unsafe extern "C" {
@@ -202,7 +216,7 @@ impl Default for AxisState {
 const BASE_PATH: &str = "ux0:data/ruffle";
 
 #[cfg(target_os = "horizon")]
-const BASE_PATH: &str = "/ruffle";
+const BASE_PATH: &str = "/switch/ruffle";
 
 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
 const BASE_PATH: &str = "./ruffle";
@@ -259,8 +273,6 @@ fn load_config() -> Result<
 
 fn main() {
     sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
-    sdl2::hint::set("VITA_DISABLE_TOUCH_FRONT", "1");
-    sdl2::hint::set("VITA_DISABLE_TOUCH_BACK", "1");
 
     let mut axis_state = AxisState::default();
     let sdl2_context = sdl2::init().unwrap();
@@ -271,17 +283,20 @@ fn main() {
     // SDL2's default vitaGL config isn't ideal, so we gotta get a little unsafe
     #[cfg(target_os = "vita")]
     unsafe {
+        vglSetParamBufferSize(4 * 1024 * 1024);
+        vglUseCachedMem(true);
+        vglUseTripleBuffering(false);
+        vglSetSemanticBindingMode(VGL_MODE_POSTPONED);
         vglInitWithCustomThreshold(
             0,
             960,
             544,
-            8 * 1024 * 1024,
+            4 * 1024 * 1024,
             0,
             0,
             0,
             SCE_GXM_MULTISAMPLE_2X,
         );
-        vglSetSemanticBindingMode(VGL_MODE_POSTPONED);
     }
 
     let gl_attr = sdl2_video.gl_attr();

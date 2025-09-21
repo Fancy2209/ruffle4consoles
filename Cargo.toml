@@ -25,7 +25,7 @@ serde = "1.0.225"
 [package.metadata.vita]
 title_id = "RUFFLVITA"
 title_name = "Ruffle"
-build_std = "core,alloc,std,panic_abort"
+build_std = "std,panic_abort"
 strip_symbols = true
 
 [profile.vita]

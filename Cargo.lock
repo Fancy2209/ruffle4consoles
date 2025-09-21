@@ -1826,9 +1826,9 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glow",
+ "image",
  "log",
  "ruffle_render",
- "sdl2",
  "swf",
  "thiserror 2.0.16",
 ]

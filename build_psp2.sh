@@ -1,4 +1,4 @@
-# Wrapped Allocators seem to cause issues
+# Wrapped Allocators seem to cause issues with touch and don't seem to help with the OOMs 
 #export RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,--wrap=malloc"
 #export RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,--wrap=free"
 #export RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,--wrap=calloc"

@@ -1,5 +1,4 @@
-mod audio;
-mod log;
+mod backends;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -7,8 +6,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::audio::SdlAudioBackend;
-use crate::log::ConsoleLogBackend;
+use backends::audio::SdlAudioBackend;
+//use backends::log::ConsoleLogBackend;
 use anyhow::anyhow;
 use ron::de::from_reader;
 use ron::from_str;
@@ -25,6 +24,8 @@ use serde::Deserialize;
 //#[cfg(any(target_os = "vita", target_os = "horizon"))]
 #[cfg(target_os = "horizon")]
 use core::ffi::c_void;
+
+use crate::backends::storage::DiskStorageBackend;
 
 #[cfg(target_os = "vita")]
 type SceGxmMultisampleMode = u32;
@@ -376,7 +377,7 @@ fn main() {
         println!("Couldn't load {}", format!("{}/{}", BASE_PATH, swf_name));
         std::process::exit(1);
     }
-    let log = ConsoleLogBackend::default();
+    //let log = ConsoleLogBackend::default();
 
     // Glow can only realistically be used in vita and horizon, need
     let context = Arc::new(unsafe {
@@ -385,10 +386,14 @@ fn main() {
     let renderer = GlowRenderBackend::new(context, false, StageQuality::High).unwrap();
     let audio = SdlAudioBackend::new(sdl2_context.audio().unwrap()).unwrap();
 
+    let storage_path = format!("{}/{}", BASE_PATH, "storage");
+    let _ = std::fs::create_dir_all(storage_path.clone());
+
     let player = PlayerBuilder::new()
-        .with_log(log.clone())
+        //.with_log(log.clone())
         .with_renderer(renderer)
         .with_audio(audio)
+        .with_storage(Box::new(DiskStorageBackend::new(std::path::PathBuf::from(storage_path))))
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
         .with_scale_mode(ruffle_core::StageScaleMode::ShowAll, true)

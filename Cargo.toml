@@ -21,6 +21,7 @@ anyhow = "1.0"
 glow = { git = "https://github.com/grovesNL/glow", branch = "main", features = []}
 ron = "0.11.0"
 serde = "1.0.225"
+tracing = { version = "0.1.41", features = ["log"] }
 
 [package.metadata.vita]
 title_id = "RUFFLVITA"

@@ -17,24 +17,26 @@ ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", 
 ] }
 ruffle_render = { git = "https://github.com/ruffle-rs/ruffle", branch = "master" }
 ruffle_render_glow = { path = "ruffle_render_glow" }
+ruffle_frontend_utils = { path = "frontend-utils" }
 anyhow = "1.0"
 glow = { git = "https://github.com/grovesNL/glow", branch = "main", features = []}
 ron = "0.11.0"
 serde = "1.0.225"
 tracing = { version = "0.1.41", features = ["log"] }
+url = "2.5.7"
 
 [package.metadata.vita]
 title_id = "RUFFLVITA"
 title_name = "Ruffle"
 build_std = "std,panic_abort"
-strip_symbols = true
+#strip_symbols = true
 
 [profile.vita]
 inherits = "release"
 opt-level = 3
-strip = "debuginfo"
+strip = "none"
 debug = false
-lto = true
+lto = false
 codegen-units = 1
 incremental = false
 panic = "abort"

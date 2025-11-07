@@ -27,12 +27,12 @@ use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
 use sdl2::controller::Axis;
 use serde::Deserialize;
-use url::Url;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+use url::Url;
 
-use backends::storage::DiskStorageBackend;
 use backends::audio::SdlAudioBackend;
+use backends::storage::DiskStorageBackend;
 //use backends::log::ConsoleLogBackend;
 
 //#[cfg(any(target_os = "vita", target_os = "horizon"))]
@@ -87,10 +87,10 @@ unsafe extern "C" {
     pub fn vglSetVertexPoolSize(size: u32);
 }
 
-#[used]
-#[unsafe(export_name = "_newlib_heap_size_user")]
-#[unsafe(link_section = ".data")]
-pub static _NEWLIB_HEAP_SIZE_USER: u32 = 246 * 1024 * 1024; // 246 MiB
+//#[used]
+//#[unsafe(export_name = "_newlib_heap_size_user")]
+//#[unsafe(link_section = ".data")]
+//pub static _NEWLIB_HEAP_SIZE_USER: u32 = 246 * 1024 * 1024; // 246 MiB
 
 #[cfg(target_os = "horizon")]
 unsafe extern "C" {
@@ -100,17 +100,16 @@ unsafe extern "C" {
 
 #[cfg(target_os = "horizon")]
 static _SC_PAGESIZE: i32 = 30;
-
+#[cfg(target_os = "horizon")]
+static _SC_HOST_NAME_MAX: u32 = 33;
 #[cfg(target_os = "horizon")]
 static GRND_RANDOM: u32 = 0x2;
 
+
+
 #[cfg(target_os = "horizon")]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn getrandom(
-    buf: *mut c_void,
-    mut buflen: usize,
-    flags: u32,
-) -> isize {
+pub unsafe extern "C" fn getrandom(buf: *mut c_void, mut buflen: usize, flags: u32) -> isize {
     let maxlen = if flags & GRND_RANDOM != 0 {
         512
     } else {
@@ -195,7 +194,7 @@ const BASE_PATH: &str = "ux0:data/ruffle";
 const BASE_PATH: &str = "/switch/ruffle";
 
 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
-const BASE_PATH: &str = "~/Repos/ruffle4consoles/ruffle";
+const BASE_PATH: &str = "/home/paulo/Repos/ruffle4consoles/ruffle";
 
 const CONFIG: &str = "
 Config(
@@ -248,7 +247,7 @@ fn load_config() -> Result<
 }
 
 fn main() {
-    println!("{}", _NEWLIB_HEAP_SIZE_USER);
+    //println!("{}", _NEWLIB_HEAP_SIZE_USER);
     sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
 
     let mut axis_state = AxisState::default();
@@ -371,17 +370,25 @@ fn main() {
     let storage_path = format!("{}/{}", BASE_PATH, "storage");
     let _ = std::fs::create_dir_all(storage_path.clone());
     let (sender, receiver) = mpsc::channel::<RuffleEvent>();
-    let sender = EventSender{sender};
-    let (executor, future_spawner) = AsyncExecutor::new(
-                                    sender.clone(),
-                                );
-    let navigator = ExternalNavigatorBackend::new(movie_url.clone(), future_spawner, true, Default::default(), SocketMode::Allow, Rc::new(PlayingContent::DirectFile(movie_url)), ConsoleNavigatorInterface);
+    let sender = EventSender { sender };
+    let (executor, future_spawner) = AsyncExecutor::new(sender.clone());
+    let navigator = ExternalNavigatorBackend::new(
+        movie_url.clone(),
+        future_spawner,
+        true,
+        Default::default(),
+        SocketMode::Allow,
+        Rc::new(PlayingContent::DirectFile(movie_url)),
+        ConsoleNavigatorInterface,
+    );
 
     let player = PlayerBuilder::new()
         //.with_log(log.clone())
         .with_renderer(renderer)
         .with_audio(audio)
-        .with_storage(Box::new(DiskStorageBackend::new(std::path::PathBuf::from(storage_path))))
+        .with_storage(Box::new(DiskStorageBackend::new(std::path::PathBuf::from(
+            storage_path,
+        ))))
         .with_navigator(navigator)
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
@@ -391,7 +398,7 @@ fn main() {
         .with_gamepad_button_mapping(gamepad_button_mapping)
         .with_autoplay(true)
         .build();
-    let playerbox = Some(ActivePlayer{player, executor});
+    let playerbox = Some(ActivePlayer { player, executor });
     let player: &Arc<Mutex<Player>> = &playerbox.as_ref().unwrap().player;
     last_frame_time = Instant::now();
     player.lock().unwrap().preload(&mut ExecutionLimit::none());

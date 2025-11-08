@@ -216,14 +216,14 @@ fn load_config() -> Result<
     ),
     ParseEnumError,
 > {
-    let config_file = format!("{}/config.ron", BASE_PATH);
+    let config_file = std::env::current_exe().unwrap().parent().unwrap().join("config.ron");
     let config_file_clone = config_file.clone();
     let f = File::open(config_file);
     if f.is_ok() {
         let config: Config = match from_reader(f.unwrap()) {
             Ok(x) => x,
             Err(e) => {
-                println!("Couldn't load config file:{}", config_file_clone);
+                println!("Couldn't load config file:{}", config_file_clone.to_string_lossy());
                 println!("{}", e);
                 from_str(CONFIG).unwrap()
             }
@@ -235,7 +235,7 @@ fn load_config() -> Result<
         }
         Ok((gamepad_button_mapping, config.swf_name, config.swf_url))
     } else {
-        println!("Couldn't load config file:{}", config_file_clone);
+        println!("Couldn't load config file:{}", config_file_clone.to_string_lossy());
         let config: Config = from_str(CONFIG).unwrap();
         let mut gamepad_button_mapping: HashMap<GamepadButton, KeyCode> = HashMap::new();
         for (button, key) in config.gamepad_config.into_iter() {
@@ -334,28 +334,12 @@ fn main() {
 
     let gl_context = sdl2_window.gl_create_context().unwrap();
     let _ = sdl2_window.gl_make_current(&gl_context);
-    let swf_name = if swf_name.is_some() {
-        swf_name.unwrap()
-    } else {
-        "movie.swf".into()
-    };
-    let swf_url = if swf_url.is_some() {
-        swf_url.unwrap()
-    } else {
-        "file:///movie.swf".into()
-    };
-
-    #[cfg(not(target_os = "vita"))]
-    let movie_url = Url::parse(&format!("file://{}/{}", BASE_PATH, swf_name)).unwrap();
-    #[cfg(target_os = "vita")]
-    let movie_url = Url::parse(&format!("file:///{}/{}", "data/ruffle", swf_name)).unwrap();
-
-    let swf_data = std::fs::read(format!("{}/{}", BASE_PATH, swf_name));
-    let movie = SwfMovie::from_data(&swf_data.unwrap(), swf_url.into(), None)
-        .map_err(|e| anyhow!(e.to_string()));
+    let swf_name = std::env::current_exe().unwrap().parent().unwrap().join("Matts Hidden Cats.swf");
+    let movie_url = Url::parse(&format!("file://{}", swf_name.to_string_lossy())).unwrap();
+    let movie = SwfMovie::from_path(&swf_name, None);
 
     if movie.is_err() {
-        println!("Couldn't load {}", format!("{}/{}", BASE_PATH, swf_name));
+        println!("Couldn't load {}", swf_name.to_string_lossy());
         std::process::exit(1);
     }
     //let log = ConsoleLogBackend::default();
@@ -367,7 +351,7 @@ fn main() {
     let renderer = GlowRenderBackend::new(context, false, StageQuality::High).unwrap();
     let audio = SdlAudioBackend::new(sdl2_context.audio().unwrap()).unwrap();
 
-    let storage_path = format!("{}/{}", BASE_PATH, "storage");
+    let storage_path = std::env::current_exe().unwrap().parent().unwrap().join("Saves");
     let _ = std::fs::create_dir_all(storage_path.clone());
     let (sender, receiver) = mpsc::channel::<RuffleEvent>();
     let sender = EventSender { sender };
@@ -478,6 +462,22 @@ fn main() {
                                 button: ruffle_button,
                             });
                     }
+                }
+                #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
+                sdl2::event::Event::MouseMotion {
+                    timestamp: _,
+                    window_id: _,
+                    which: _,
+                    mousestate: _,
+                    x,
+                    y,
+                    xrel: _,
+                    yrel: _
+                } => {
+                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
+                            x: x.into(),
+                            y: y.into(),
+                        });
                 }
                 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
                 sdl2::event::Event::MouseButtonDown {

@@ -392,9 +392,9 @@ fn main() {
         .with_navigator(navigator)
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
-        .with_scale_mode(ruffle_core::StageScaleMode::ShowAll, true)
+        //.with_scale_mode(ruffle_core::StageScaleMode::ShowAll, true)
         .with_fullscreen(true)
-        .with_letterbox(Letterbox::On)
+        .with_letterbox(Letterbox::Off)
         .with_gamepad_button_mapping(gamepad_button_mapping)
         .with_autoplay(true)
         .build();
@@ -480,6 +480,22 @@ fn main() {
                     }
                 }
                 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
+                sdl2::event::Event::MouseMotion {
+                    timestamp: _,
+                    window_id: _,
+                    which: _,
+                    mousestate: _,
+                    x,
+                    y,
+                    xrel: _,
+                    yrel: _
+                } => {
+                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
+                            x: x.into(),
+                            y: y.into(),
+                        });
+                }
+                #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
                 sdl2::event::Event::MouseButtonDown {
                     timestamp: _,
                     window_id: _,
@@ -517,6 +533,21 @@ fn main() {
                             button: ruffle_button,
                         });
                     }
+                }
+                sdl2::event::Event::FingerMotion {
+                  timestamp: _,
+                  touch_id: _,
+                  finger_id: _,
+                  x,
+                  y,
+                  dx: _,
+                  dy: _,
+                  pressure: _
+                } => {
+                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
+                            x: x as f64 * dimensions.width as f64,
+                            y: y as f64 * dimensions.height as f64
+                        });
                 }
                 sdl2::event::Event::FingerDown {
                     timestamp: _,

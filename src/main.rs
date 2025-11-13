@@ -31,14 +31,6 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use url::Url;
 
-// Let's see if this helps
-#[cfg(not(target_env = "msvc"))]
-use tikv_jemallocator::Jemalloc;
-
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
-
 use backends::audio::SdlAudioBackend;
 use backends::storage::DiskStorageBackend;
 //use backends::log::ConsoleLogBackend;

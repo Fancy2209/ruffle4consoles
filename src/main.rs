@@ -9,6 +9,7 @@ use std::fs::File;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Instant;
 
 use anyhow::anyhow;
@@ -246,7 +247,15 @@ fn load_config() -> Result<
     }
 }
 
-fn main() {
+pub fn main() {
+    if cfg!(target_os = "vita") {
+        unsafe {
+            let id = vitasdk_sys::sceKernelGetThreadId();
+            vitasdk_sys::sceKernelChangeThreadPriority(id, vitasdk_sys::SCE_KERNEL_PROCESS_PRIORITY_USER_HIGH as _);
+            vitasdk_sys::sceKernelChangeThreadCpuAffinityMask(id, vitasdk_sys::SCE_KERNEL_CPU_MASK_USER_1 as _);
+        }
+    }
+
     //println!("{}", _NEWLIB_HEAP_SIZE_USER);
     sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
 

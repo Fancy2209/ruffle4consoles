@@ -25,11 +25,19 @@ serde = "1.0.225"
 tracing = { version = "0.1.41", features = ["log"] }
 url = "2.5.7"
 
+[target.armv7-sony-vita-newlibeabihf.dependencies]
+vitasdk-sys = { version = "0.3.2", features = [
+    "SceLibKernel_stub",
+    "SceKernelThreadMgr_stub"
+] }
+
 [package.metadata.vita]
 title_id = "RUFFLVITA"
 title_name = "Ruffle"
 build_std = "std,panic_abort"
-#strip_symbols = true
+
+[package.metadata.vita.profile.vita]
+strip_symbols = true
 
 [profile.release]
 debug = true
@@ -38,7 +46,7 @@ debug = true
 inherits = "release"
 opt-level = 3
 strip = "none"
-debug = false
+#debug = false
 lto = false
 codegen-units = 1
 incremental = false
@@ -47,7 +55,7 @@ panic = "abort"
 [profile.switch]
 inherits = "release"
 opt-level = 3
-debug = false
+#debug = false
 strip = "none"
 lto = true
 codegen-units = 1

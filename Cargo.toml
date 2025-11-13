@@ -25,6 +25,9 @@ serde = "1.0.225"
 tracing = { version = "0.1.41", features = ["log"] }
 url = "2.5.7"
 
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"
+
 [package.metadata.vita]
 title_id = "RUFFLVITA"
 title_name = "Ruffle"

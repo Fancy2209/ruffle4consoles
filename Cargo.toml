@@ -16,48 +16,9 @@ ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", 
     "default_font",
 ] }
 ruffle_render = { git = "https://github.com/ruffle-rs/ruffle", branch = "master" }
-ruffle_render_glow = { path = "ruffle_render_glow" }
-ruffle_frontend_utils = { path = "frontend-utils" }
-anyhow = "1.0"
+ruffle_frontend_utils = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", features = ["fs"] }
 glow = { git = "https://github.com/grovesNL/glow", branch = "main", features = []}
-ron = "0.11.0"
-serde = "1.0.225"
+ruffle_render_glow = { path = "ruffle_render_glow" }
+anyhow = "1.0"
 tracing = { version = "0.1.41", features = ["log"] }
 url = "2.5.7"
-
-[target.armv7-sony-vita-newlibeabihf.dependencies]
-vitasdk-sys = { version = "0.3.2", features = [
-    "SceLibKernel_stub",
-    "SceKernelThreadMgr_stub"
-] }
-
-[package.metadata.vita]
-title_id = "RUFFLVITA"
-title_name = "Ruffle"
-build_std = "std,panic_abort"
-
-[package.metadata.vita.profile.vita]
-strip_symbols = true
-
-[profile.release]
-debug = true
-
-[profile.vita]
-inherits = "release"
-opt-level = 3
-strip = "none"
-#debug = false
-lto = false
-codegen-units = 1
-incremental = false
-panic = "abort"
-
-[profile.switch]
-inherits = "release"
-opt-level = 3
-#debug = false
-strip = "none"
-lto = true
-codegen-units = 1
-incremental = false
-panic = "abort"

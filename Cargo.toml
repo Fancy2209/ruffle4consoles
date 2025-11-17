@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sdl2 = { version = "0.38.0", features = ["static-link", "use-pkgconfig"] }
+sdl2 = { git = "https://github.com/Rust-SDL2/rust-sdl2", branch = "master", features = ["bundled"] }
 ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", features = [
     "audio",
     "symphonia",

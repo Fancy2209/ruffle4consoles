@@ -118,7 +118,7 @@ pub struct GlowRenderBackend {
 
     // The frame buffers used for resolving MSAA.
     msaa_buffers: Option<MsaaBuffers>,
-    #[cfg(not(target_os = "vita"))]
+    #[cfg(not(any(target_os = "vita", target_os = "android")))]
     msaa_sample_count: u32,
 
     max_texture_size: u32,
@@ -181,21 +181,21 @@ impl GlowRenderBackend {
     pub fn new(
         glow_context: Arc<glow::Context>,
         is_transparent: bool,
-        #[cfg(not(target_os = "vita"))] quality: StageQuality,
-        #[cfg(target_os = "vita")] _quality: StageQuality,
+        #[cfg(not(any(target_os = "vita", target_os = "android")))] quality: StageQuality,
+        #[cfg(any(target_os = "vita", target_os = "android")) _quality: StageQuality,
     ) -> Result<Self, Error> {
         log::info!("Creating glow context.");
         unsafe {
             let gl = glow_context;
 
             // Determine MSAA sample count.
-            #[cfg(not(target_os = "vita"))]
+            #[cfg(not(any(target_os = "vita", target_os = "android")))]
             let mut msaa_sample_count = quality.sample_count().min(4);
 
             //// Ensure that we don't exceed the max MSAA of this device.
-            #[cfg(not(target_os = "vita"))]
+            #[cfg(not(any(target_os = "vita", target_os = "android")))]
             let max_samples = gl.get_parameter_i32(glow::MAX_SAMPLES) as u32;
-            #[cfg(not(target_os = "vita"))]
+            #[cfg(not(any(target_os = "vita", target_os = "android")))]
             if max_samples > 0 && max_samples < msaa_sample_count {
                 log::info!("Device only supports {max_samples}xMSAA");
                 msaa_sample_count = max_samples;
@@ -230,7 +230,7 @@ impl GlowRenderBackend {
                 gl,
 
                 msaa_buffers: None,
-                #[cfg(not(target_os = "vita"))]
+                #[cfg(not(any(target_os = "vita", target_os = "android")))]
                 msaa_sample_count,
 
                 max_texture_size,
@@ -397,13 +397,13 @@ impl GlowRenderBackend {
     }
 
     fn build_msaa_buffers(&mut self) -> Result<(), Error> {
-        #[cfg(target_os = "vita")]
+        #[cfg(any(target_os = "vita", target_os = "android"))
         unsafe {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
             self.gl.bind_renderbuffer(glow::RENDERBUFFER, None);
             return Ok(());
         }
-        #[cfg(not(target_os = "vita"))]
+        #[cfg(not(any(target_os = "vita", target_os = "android")))]
         unsafe {
             let gl = self.gl.as_ref();
 
@@ -1823,9 +1823,9 @@ enum DrawType {
 }
 
 struct MsaaBuffers {
-    #[cfg(not(target_os = "vita"))]
+    #[cfg(not(any(target_os = "vita", target_os = "android")))]
     color_renderbuffer: glow::Renderbuffer,
-    #[cfg(not(target_os = "vita"))]
+    #[cfg(not(any(target_os = "vita", target_os = "android")))]
     stencil_renderbuffer: glow::Renderbuffer,
     render_framebuffer: glow::Framebuffer,
     color_framebuffer: glow::Framebuffer,

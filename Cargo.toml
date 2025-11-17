@@ -3,6 +3,9 @@ name = "ruffle4consoles"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
 sdl2 = { git = "https://github.com/Rust-SDL2/rust-sdl2", branch = "master", features = ["bundled"] }
 ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", features = [

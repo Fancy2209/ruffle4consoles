@@ -28,6 +28,12 @@ struct ActivePlayer {
     player: Arc<Mutex<Player>>,
 }
 
+#[unsafe(no_mangle)]
+pub extern fn SDL_main(_argc: libc::c_int, _argv: *const *const libc::c_char) -> libc::c_int {
+    main();
+    return 0;
+}
+
 pub fn main() {
     let mut last_frame_time: Instant;
 
@@ -87,7 +93,7 @@ pub fn main() {
         ))))
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
-        .with_fullscreen(true)
+        .with_fullscreen(false)
         .with_letterbox(Letterbox::Off)
         .with_autoplay(true)
         .build();
@@ -109,15 +115,11 @@ pub fn main() {
                         player.lock().unwrap().set_viewport_dimensions(dimensions);
                     }
                 }
+                /*
                 sdl2::event::Event::MouseMotion {
-                    timestamp: _,
-                    window_id: _,
-                    which: _,
-                    mousestate: _,
                     x,
                     y,
-                    xrel: _,
-                    yrel: _,
+                    ..
                 } => {
                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
                         x: x.into(),
@@ -125,13 +127,10 @@ pub fn main() {
                     });
                 }
                 sdl2::event::Event::MouseButtonDown {
-                    timestamp: _,
-                    window_id: _,
-                    which: _,
                     mouse_btn,
-                    clicks: _,
                     x,
                     y,
+                    ..
                 } => {
                     let ruffle_button = sdl_mousebutton_to_ruffle(mouse_btn);
                     if let Some(ruffle_button) = ruffle_button {
@@ -144,13 +143,10 @@ pub fn main() {
                     }
                 }
                 sdl2::event::Event::MouseButtonUp {
-                    timestamp: _,
-                    window_id: _,
-                    which: _,
-                    mouse_btn,
-                    clicks: _,
+                    mouse_btn,    
                     x,
                     y,
+                    ..
                 } => {
                     let ruffle_button = sdl_mousebutton_to_ruffle(mouse_btn);
                     if let Some(ruffle_button) = ruffle_button {
@@ -160,6 +156,40 @@ pub fn main() {
                             button: ruffle_button,
                         });
                     }
+                */
+                // TODO: Implement sdl2::event::Event::TextInput and UI Backend
+                sdl2::event::Event::FingerMotion {
+                  x,
+                  y,
+                  ..
+                } => {
+                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
+                            x: x as f64 * dimensions.width as f64,
+                            y: y as f64 * dimensions.height as f64
+                        });
+                }
+                sdl2::event::Event::FingerDown {
+                    x,
+                    y,
+                    ..
+                } => {
+                    player.lock().unwrap().handle_event(PlayerEvent::MouseDown {
+                        x: x as f64 * dimensions.width as f64,
+                        y: y as f64 * dimensions.height as f64,
+                        button: MouseButton::Left,
+                        index: None,
+                    });
+                }
+                sdl2::event::Event::FingerUp {
+                    x,
+                    y,
+                    ..
+                } => {
+                    player.lock().unwrap().handle_event(PlayerEvent::MouseUp {
+                        x: x as f64 * dimensions.width as f64,
+                        y: y as f64 * dimensions.height as f64,
+                        button: MouseButton::Left,
+                    });
                 }
                 _ => {}
             }

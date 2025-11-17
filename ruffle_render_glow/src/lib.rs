@@ -182,7 +182,7 @@ impl GlowRenderBackend {
         glow_context: Arc<glow::Context>,
         is_transparent: bool,
         #[cfg(not(any(target_os = "vita", target_os = "android")))] quality: StageQuality,
-        #[cfg(any(target_os = "vita", target_os = "android")) _quality: StageQuality,
+        #[cfg(any(target_os = "vita", target_os = "android"))] _quality: StageQuality,
     ) -> Result<Self, Error> {
         log::info!("Creating glow context.");
         unsafe {
@@ -397,7 +397,7 @@ impl GlowRenderBackend {
     }
 
     fn build_msaa_buffers(&mut self) -> Result<(), Error> {
-        #[cfg(any(target_os = "vita", target_os = "android"))
+        #[cfg(any(target_os = "vita", target_os = "android"))]
         unsafe {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
             self.gl.bind_renderbuffer(glow::RENDERBUFFER, None);

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
+name = "main"
 crate-type = ["cdylib"]
 
 [dependencies]
@@ -25,3 +26,6 @@ ruffle_render_glow = { path = "ruffle_render_glow" }
 anyhow = "1.0"
 tracing = { version = "0.1.41", features = ["log"] }
 url = "2.5.7"
+
+[target.x86_64-linux-android]
+runner = "cargo ndk-runner"

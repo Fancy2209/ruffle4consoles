@@ -2,5 +2,7 @@
 src/movie.swf
 src/FPA 1 REMIX.swf
 src/FPA 3.swf
-
+android-project/app/build
+android-project/app/.idea
+android-project/app/.gradle
 ruffle/

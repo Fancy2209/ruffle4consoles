@@ -3,23 +3,17 @@
 
 mod backends;
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::anyhow;
 use ruffle_core::config::Letterbox;
-use ruffle_core::events::{GamepadButton, KeyCode, MouseButton, ParseEnumError};
+use ruffle_core::events::MouseButton;
 use ruffle_core::limits::ExecutionLimit;
 use ruffle_core::tag_utils::SwfMovie;
 use ruffle_core::{Player, PlayerBuilder, PlayerEvent, ViewportDimensions};
 use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
-use sdl2::controller::Axis;
-use url::Url;
 
 use backends::audio::SdlAudioBackend;
 use ruffle_frontend_utils::backends::storage::DiskStorageBackend;
@@ -29,7 +23,7 @@ struct ActivePlayer {
 }
 
 #[unsafe(no_mangle)]
-pub extern fn SDL_main(_argc: libc::c_int, _argv: *const *const libc::c_char) -> libc::c_int {
+pub extern "C" fn SDL_main(_argc: i32, _argv: *const *const i8) -> i32 {
     main();
     return 0;
 }
@@ -37,6 +31,10 @@ pub extern fn SDL_main(_argc: libc::c_int, _argv: *const *const libc::c_char) ->
 pub fn main() {
     let mut last_frame_time: Instant;
 
+    sdl2::hint::set("SDL_IOS_ORIENTATIONS", "LandscapeLeft LandscapeRight");
+    //sdl2::hint::set("SDL_ANDROID_BLOCK_ON_PAUSE", "1");
+    sdl2::hint::set("SDL_MOUSE_TOUCH_EVENTS", "0");
+    sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
     let sdl2_context = sdl2::init().unwrap();
     let sdl2_video = sdl2_context.video().unwrap();
 
@@ -55,7 +53,8 @@ pub fn main() {
         .window("Matt's Hidden Cats", dimensions.width, dimensions.height)
         .opengl()
         .resizable()
-        //.fullscreen_desktop()
+        .fullscreen_desktop()
+        .borderless()
         .position_centered()
         .build()
         .unwrap();
@@ -67,14 +66,9 @@ pub fn main() {
 
     let swf_url = "file:///movie.swf";
 
-    let swf_data = std::fs::read(std::env::current_exe().unwrap().parent().unwrap().join("Matts Hidden Cats.swf"));
+    let swf_data = include_bytes!("Matts Hidden Cats.swf");
     let movie =
-        SwfMovie::from_data(&swf_data.unwrap(), swf_url.to_string(), None).map_err(|e| anyhow!(e.to_string()));
-
-    if movie.is_err() {
-        println!("Couldn't load {}", std::env::current_exe().unwrap().parent().unwrap().join("Matts Hidden Cats.swf").to_string_lossy());
-        std::process::exit(1);
-    }
+        SwfMovie::from_data(swf_data, swf_url.to_string(), None).map_err(|e| anyhow!(e.to_string()));
 
     let context = Arc::new(unsafe {
         glow::Context::from_loader_function(|s| sdl2_video.gl_get_proc_address(s) as *const _)
@@ -82,7 +76,9 @@ pub fn main() {
     let renderer = GlowRenderBackend::new(context, false, StageQuality::High).unwrap();
     let audio = SdlAudioBackend::new(sdl2_context.audio().unwrap()).unwrap();
 
-    let storage_path = std::env::current_exe().unwrap().parent().unwrap().join("Saves");
+    let base_path = sdl2::filesystem::pref_path("KupoGames", "MattsHiddenCats");
+    let storage_path = format!("{}/{}", base_path.unwrap(), "Saves");
+    println!("{}", storage_path);
     let _ = std::fs::create_dir_all(storage_path.clone());
 
     let player = PlayerBuilder::new()
@@ -105,6 +101,15 @@ pub fn main() {
         for event in event_pump.poll_iter() {
             match event {
                 sdl2::event::Event::Quit { .. } => break 'main,
+                
+                // Prevent issues
+                sdl2::event::Event::AppWillEnterBackground { .. } => {
+                    player.lock().unwrap().handle_event(PlayerEvent::FocusGained);
+                },
+                sdl2::event::Event::AppWillEnterForeground { .. } => {
+                    player.lock().unwrap().handle_event(PlayerEvent::FocusLost);
+                },
+                
                 sdl2::event::Event::Window {
                     win_event: sdl2::event::WindowEvent::Resized(w, h),
                     ..
@@ -115,7 +120,6 @@ pub fn main() {
                         player.lock().unwrap().set_viewport_dimensions(dimensions);
                     }
                 }
-                /*
                 sdl2::event::Event::MouseMotion {
                     x,
                     y,
@@ -156,7 +160,7 @@ pub fn main() {
                             button: ruffle_button,
                         });
                     }
-                */
+                }
                 // TODO: Implement sdl2::event::Event::TextInput and UI Backend
                 sdl2::event::Event::FingerMotion {
                   x,

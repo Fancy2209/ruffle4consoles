@@ -769,27 +769,59 @@ impl GlowRenderBackend {
 
     fn apply_blend_mode(&mut self, mode: RenderBlendMode) {
         unsafe {
-            let (blend_op, src_rgb, dst_rgb) = match mode {
+            let (blend_op, src_rgb, dst_rgb, src_a, dst_a) = match mode {
                 RenderBlendMode::Builtin(BlendMode::Normal) => {
                     // src + (1-a)
-                    (glow::FUNC_ADD, glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+                    (
+                        glow::FUNC_ADD,
+                        glow::ONE, glow::ONE_MINUS_SRC_ALPHA, 
+                        glow::ONE, glow::ONE_MINUS_SRC_ALPHA
+                    )
                 }
                 RenderBlendMode::Builtin(BlendMode::Add) => {
                     // src + dst
-                    (glow::FUNC_ADD, glow::ONE, glow::ONE)
+                    (
+                        glow::FUNC_ADD,
+                        glow::ONE, glow::ONE, 
+                        glow::ONE, glow::ONE_MINUS_SRC_ALPHA
+                    )
                 }
                 RenderBlendMode::Builtin(BlendMode::Subtract) => {
                     // dst - src
-                    (glow::FUNC_REVERSE_SUBTRACT, glow::ONE, glow::ONE)
+                    (
+                        glow::FUNC_REVERSE_SUBTRACT,
+                        glow::ONE, glow::ONE, 
+                        glow::ONE, glow::ONE_MINUS_SRC_ALPHA
+                    )
+                }
+                RenderBlendMode::Builtin(BlendMode::Alpha) => {
+                    // dst - src
+                    (
+                        glow::FUNC_ADD, 
+                        glow::ZERO, glow::SRC_ALPHA, 
+                        glow::ZERO, glow::SRC_ALPHA
+                    )
+                }
+                RenderBlendMode::Builtin(BlendMode::Layer) => {
+                    // dst - src
+                    (
+                        glow::FUNC_ADD,
+                        glow::ONE, glow::ONE_MINUS_SRC_ALPHA, 
+                        glow::ONE, glow::ONE_MINUS_SRC_ALPHA
+                    )
                 }
                 _ => {
                     // TODO: Unsupported blend mode. Default to normal for now.
-                    (glow::FUNC_ADD, glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+                    (
+                        glow::FUNC_ADD,
+                        glow::ONE, glow::ONE_MINUS_SRC_ALPHA,
+                        glow::ONE, glow::ONE_MINUS_SRC_ALPHA
+                    )
                 }
             };
             self.gl.blend_equation_separate(blend_op, glow::FUNC_ADD);
             self.gl
-                .blend_func_separate(src_rgb, dst_rgb, glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+                .blend_func_separate(src_rgb, dst_rgb, src_a, dst_a);
         }
     }
 

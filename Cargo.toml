@@ -21,11 +21,12 @@ ruffle_core = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", 
 ] }
 ruffle_render = { git = "https://github.com/ruffle-rs/ruffle", branch = "master" }
 ruffle_frontend_utils = { git = "https://github.com/ruffle-rs/ruffle", branch = "master", features = ["fs"] }
-glow = { git = "https://github.com/grovesNL/glow", branch = "main", features = []}
+glow = { git = "https://github.com/grovesNL/glow", branch = "main", features = [] }
 ruffle_render_glow = { path = "ruffle_render_glow" }
 anyhow = "1.0"
 tracing = { version = "0.1.41", features = ["log"] }
 url = "2.5.7"
+chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
 
 [target.x86_64-linux-android]
 runner = "cargo ndk-runner"

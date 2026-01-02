@@ -3,33 +3,34 @@
 
 mod backends;
 
-use std::sync::{Arc, Mutex};
+use std::boxed::Box;
+use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::anyhow;
 use ruffle_core::config::Letterbox;
-use ruffle_core::events::MouseButton;
+use ruffle_core::events::{MouseButton, MouseWheelDelta, TextControlCode};
 use ruffle_core::limits::ExecutionLimit;
 use ruffle_core::tag_utils::SwfMovie;
-use ruffle_core::{Player, PlayerBuilder, PlayerEvent, ViewportDimensions};
+use ruffle_core::{PlayerBuilder, PlayerEvent, ViewportDimensions};
 use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
 
 use backends::audio::SdlAudioBackend;
+use backends::ui::NullUiBackend;
 use ruffle_frontend_utils::backends::storage::DiskStorageBackend;
 
-struct ActivePlayer {
-    player: Arc<Mutex<Player>>,
-}
 
-#[unsafe(no_mangle)]
-pub extern "C" fn SDL_main(_argc: i32, _argv: *const *const i8) -> i32 {
-    main();
-    return 0;
-}
+//#[unsafe(no_mangle)]
+//pub extern "C" fn SDL_main(_argc: i32, _argv: *const *const i8) -> i32 {
+//    main();
+//    return 0;
+//}
 
 pub fn main() {
     let mut last_frame_time: Instant;
+    let mut num_fingers: i32 = 0;
 
     sdl2::hint::set("SDL_IOS_ORIENTATIONS", "LandscapeLeft LandscapeRight");
     //sdl2::hint::set("SDL_ANDROID_BLOCK_ON_PAUSE", "1");
@@ -41,6 +42,8 @@ pub fn main() {
     let gl_attr = sdl2_video.gl_attr();
     gl_attr.set_context_profile(sdl2::video::GLProfile::GLES);
     gl_attr.set_context_version(2, 0);
+    gl_attr.set_stencil_size(8);
+
     let _ = sdl2_video.gl_set_swap_interval(0);
 
     let mut dimensions = ViewportDimensions {
@@ -52,7 +55,7 @@ pub fn main() {
     let sdl2_window = sdl2_video
         .window("Matt's Hidden Cats", dimensions.width, dimensions.height)
         .opengl()
-        .resizable()
+//        .resizable()
         .fullscreen_desktop()
         .borderless()
         .position_centered()
@@ -67,8 +70,8 @@ pub fn main() {
     let swf_url = "file:///movie.swf";
 
     let swf_data = include_bytes!("Matts Hidden Cats.swf");
-    let movie =
-        SwfMovie::from_data(swf_data, swf_url.to_string(), None).map_err(|e| anyhow!(e.to_string()));
+    let movie = SwfMovie::from_data(swf_data, swf_url.to_string(), None)
+        .map_err(|e| anyhow!(e.to_string()));
 
     let context = Arc::new(unsafe {
         glow::Context::from_loader_function(|s| sdl2_video.gl_get_proc_address(s) as *const _)
@@ -81,6 +84,8 @@ pub fn main() {
     println!("{}", storage_path);
     let _ = std::fs::create_dir_all(storage_path.clone());
 
+    let ui_backend = NullUiBackend::new(Box::new(sdl2_window.clone()));
+
     let player = PlayerBuilder::new()
         .with_renderer(renderer)
         .with_audio(audio)
@@ -89,9 +94,11 @@ pub fn main() {
         ))))
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
-        .with_fullscreen(false)
+        .with_fullscreen(true)
+        .with_max_execution_duration(Duration::from_secs(u64::MAX))
         .with_letterbox(Letterbox::Off)
         .with_autoplay(true)
+        .with_ui(ui_backend)
         .build();
     last_frame_time = Instant::now();
     player.lock().unwrap().preload(&mut ExecutionLimit::none());
@@ -101,15 +108,19 @@ pub fn main() {
         for event in event_pump.poll_iter() {
             match event {
                 sdl2::event::Event::Quit { .. } => break 'main,
-                
+
                 // Prevent issues
                 sdl2::event::Event::AppWillEnterBackground { .. } => {
-                    player.lock().unwrap().handle_event(PlayerEvent::FocusGained);
-                },
+                    player
+                        .lock()
+                        .unwrap()
+                        .handle_event(PlayerEvent::FocusGained);
+                }
+
                 sdl2::event::Event::AppWillEnterForeground { .. } => {
                     player.lock().unwrap().handle_event(PlayerEvent::FocusLost);
-                },
-                
+                }
+
                 sdl2::event::Event::Window {
                     win_event: sdl2::event::WindowEvent::Resized(w, h),
                     ..
@@ -120,21 +131,16 @@ pub fn main() {
                         player.lock().unwrap().set_viewport_dimensions(dimensions);
                     }
                 }
-                sdl2::event::Event::MouseMotion {
-                    x,
-                    y,
-                    ..
-                } => {
+
+                sdl2::event::Event::MouseMotion { x, y, .. } => {
                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
                         x: x.into(),
                         y: y.into(),
                     });
                 }
+
                 sdl2::event::Event::MouseButtonDown {
-                    mouse_btn,
-                    x,
-                    y,
-                    ..
+                    mouse_btn, x, y, ..
                 } => {
                     let ruffle_button = sdl_mousebutton_to_ruffle(mouse_btn);
                     if let Some(ruffle_button) = ruffle_button {
@@ -146,11 +152,9 @@ pub fn main() {
                         });
                     }
                 }
+
                 sdl2::event::Event::MouseButtonUp {
-                    mouse_btn,    
-                    x,
-                    y,
-                    ..
+                    mouse_btn, x, y, ..
                 } => {
                     let ruffle_button = sdl_mousebutton_to_ruffle(mouse_btn);
                     if let Some(ruffle_button) = ruffle_button {
@@ -161,40 +165,77 @@ pub fn main() {
                         });
                     }
                 }
-                // TODO: Implement sdl2::event::Event::TextInput and UI Backend
-                sdl2::event::Event::FingerMotion {
-                  x,
-                  y,
-                  ..
-                } => {
-                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
+
+                sdl2::event::Event::FingerMotion { x, y, .. } => {
+                    if num_fingers == 1 {
+                        player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
                             x: x as f64 * dimensions.width as f64,
-                            y: y as f64 * dimensions.height as f64
+                            y: y as f64 * dimensions.height as f64,
                         });
+                    }
                 }
-                sdl2::event::Event::FingerDown {
-                    x,
-                    y,
-                    ..
-                } => {
-                    player.lock().unwrap().handle_event(PlayerEvent::MouseDown {
-                        x: x as f64 * dimensions.width as f64,
-                        y: y as f64 * dimensions.height as f64,
-                        button: MouseButton::Left,
-                        index: None,
-                    });
+
+                sdl2::event::Event::FingerDown { x, y, .. } => {
+                    num_fingers += 1;
+                    if num_fingers == 1 {
+                        player.lock().unwrap().handle_event(PlayerEvent::MouseDown {
+                            x: x as f64 * dimensions.width as f64,
+                            y: y as f64 * dimensions.height as f64,
+                            button: MouseButton::Left,
+                            index: None,
+                        });
+                    }
                 }
-                sdl2::event::Event::FingerUp {
-                    x,
-                    y,
-                    ..
-                } => {
+
+                sdl2::event::Event::FingerUp { x, y, .. } => {
+                    if num_fingers == 2 {
+                        player.lock().unwrap().handle_event(PlayerEvent::MouseUp {
+                            x: x as f64 * dimensions.width as f64,
+                            y: y as f64 * dimensions.height as f64,
+                            button: MouseButton::Left,
+                        });
+                    }
+                    num_fingers -= 1;
+                }
+
+                sdl2::event::Event::TextInput { text, .. } => {
+                    for codepoint in text.chars() {
+                        player
+                            .lock()
+                            .unwrap()
+                            .handle_event(PlayerEvent::TextInput { codepoint });
+                    }
+                }
+
+                sdl2::event::Event::KeyDown { scancode, .. } => {
+                    if scancode == Some(sdl2::keyboard::Scancode::Backspace) {
+                        player
+                            .lock()
+                            .unwrap()
+                            .handle_event(PlayerEvent::TextControl {
+                                code: TextControlCode::Backspace,
+                            });
+                    }
+                }
+
+                sdl2::event::Event::MultiGesture { x, y, d_dist, .. } => {
+
                     player.lock().unwrap().handle_event(PlayerEvent::MouseUp {
                         x: x as f64 * dimensions.width as f64,
                         y: y as f64 * dimensions.height as f64,
                         button: MouseButton::Left,
+                    }); 
+
+                    player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
+                        x: x as f64 * dimensions.width as f64,
+                        y: y as f64 * dimensions.height as f64,
+                    });
+
+                    player.lock().unwrap().handle_event(PlayerEvent::MouseWheel { 
+                        delta: MouseWheelDelta::Lines(d_dist.into()) 
                     });
                 }
+
                 _ => {}
             }
         }
@@ -213,8 +254,6 @@ pub fn main() {
     }
 }
 
-
-#[cfg(not(any(target_os = "horizon", target_os = "vita")))]
 fn sdl_mousebutton_to_ruffle(button: sdl2::mouse::MouseButton) -> Option<MouseButton> {
     match button {
         sdl2::mouse::MouseButton::Left => Some(MouseButton::Left),

@@ -3,8 +3,9 @@ src/movie.swf
 src/FPA 1 REMIX.swf
 src/FPA 3.swf
 android-project/app/build
-android-project/app/.idea
-android-project/app/.gradle
+android-project/.idea
+android-project/.gradle
 ruffle/
 src/Matts Hidden Cats.swf
 android-project/app/libs/*/libmain.so
+android-project/build/reports/problems/problems-report.html

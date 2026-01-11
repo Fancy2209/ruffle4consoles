@@ -15,17 +15,17 @@ use sdl2::video::Window;
 use url::Url;
 
 /// UiBackend that does nothing.
-pub struct NullUiBackend {
+pub struct SdlUiBackend {
     window: Box<Window>,
 }
 
-impl NullUiBackend {
+impl SdlUiBackend {
     pub fn new(window: Box<Window>) -> Self {
         Self { window }
     }
 }
 
-impl UiBackend for NullUiBackend {
+impl UiBackend for SdlUiBackend {
     fn mouse_visible(&self) -> bool {
         true
     }
@@ -42,8 +42,8 @@ impl UiBackend for NullUiBackend {
 
     fn set_fullscreen(&mut self, is_full: bool) -> Result<(), FullscreenError> {
         //if is_full {
-            let _ = self.window.set_fullscreen(FullscreenType::Desktop);
-            let _ = self.window.set_bordered(false);
+        let _ = self.window.set_fullscreen(FullscreenType::Desktop);
+        let _ = self.window.set_bordered(false);
         //} else {
         //    let _ = self.window.set_fullscreen(FullscreenType::Off);
         //    let _ = self.window.set_bordered(true);

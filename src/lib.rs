@@ -18,15 +18,15 @@ use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
 
 use backends::audio::SdlAudioBackend;
-use backends::ui::NullUiBackend;
+use backends::navigator::SdlNavigatorBackend;
+use backends::ui::SdlUiBackend;
 use ruffle_frontend_utils::backends::storage::DiskStorageBackend;
 
-
-//#[unsafe(no_mangle)]
-//pub extern "C" fn SDL_main(_argc: i32, _argv: *const *const i8) -> i32 {
-//    main();
-//    return 0;
-//}
+#[unsafe(no_mangle)]
+pub extern "C" fn SDL_main(_argc: i32, _argv: *const *const i8) -> i32 {
+    main();
+    return 0;
+}
 
 pub fn main() {
     let mut last_frame_time: Instant;
@@ -55,7 +55,6 @@ pub fn main() {
     let sdl2_window = sdl2_video
         .window("Matt's Hidden Cats", dimensions.width, dimensions.height)
         .opengl()
-//        .resizable()
         .fullscreen_desktop()
         .borderless()
         .position_centered()
@@ -84,7 +83,8 @@ pub fn main() {
     println!("{}", storage_path);
     let _ = std::fs::create_dir_all(storage_path.clone());
 
-    let ui_backend = NullUiBackend::new(Box::new(sdl2_window.clone()));
+    let ui_backend = SdlUiBackend::new(Box::new(sdl2_window.clone()));
+    let navigator_backend = SdlNavigatorBackend::new();
 
     let player = PlayerBuilder::new()
         .with_renderer(renderer)
@@ -99,6 +99,7 @@ pub fn main() {
         .with_letterbox(Letterbox::Off)
         .with_autoplay(true)
         .with_ui(ui_backend)
+        .with_navigator(navigator_backend)
         .build();
     last_frame_time = Instant::now();
     player.lock().unwrap().preload(&mut ExecutionLimit::none());
@@ -188,7 +189,7 @@ pub fn main() {
                 }
 
                 sdl2::event::Event::FingerUp { x, y, .. } => {
-                    if num_fingers == 2 {
+                    if num_fingers == 1 {
                         player.lock().unwrap().handle_event(PlayerEvent::MouseUp {
                             x: x as f64 * dimensions.width as f64,
                             y: y as f64 * dimensions.height as f64,
@@ -219,21 +220,23 @@ pub fn main() {
                 }
 
                 sdl2::event::Event::MultiGesture { x, y, d_dist, .. } => {
-
                     player.lock().unwrap().handle_event(PlayerEvent::MouseUp {
                         x: x as f64 * dimensions.width as f64,
                         y: y as f64 * dimensions.height as f64,
                         button: MouseButton::Left,
-                    }); 
+                    });
 
                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
                         x: x as f64 * dimensions.width as f64,
                         y: y as f64 * dimensions.height as f64,
                     });
 
-                    player.lock().unwrap().handle_event(PlayerEvent::MouseWheel { 
-                        delta: MouseWheelDelta::Lines(d_dist.into()) 
-                    });
+                    player
+                        .lock()
+                        .unwrap()
+                        .handle_event(PlayerEvent::MouseWheel {
+                            delta: MouseWheelDelta::Lines((d_dist * 100.0).into()),
+                        });
                 }
 
                 _ => {}

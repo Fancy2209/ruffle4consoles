@@ -1,0 +1,41 @@
+name: build
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+    build-psp2:
+        name: PSVita
+        runs-on: ubuntu-latest
+        container: ghcr.io/vita-rust/vitasdk-rs
+
+        steps:
+            - uses: actions/checkout@v6
+
+            - name: Build
+              run: ./build_psp2.sh
+
+            - uses: actions/upload-artifact@v7
+              with:
+                name: vita
+                path: target/armv7-sony-vita-newlibeabihf/vita/ruffle4consoles.vpk
+
+    build-nx:
+        name: Nintendo Switch
+        runs-on: ubuntu-latest
+        container: devkitpro/devkita64
+
+        steps:
+            - uses: actions/checkout@v6
+
+            - uses: actions-rust-lang/setup-rust-toolchain@v1
+              with:
+                toolchain: nightly
+
+            - name: Build
+              run: ./build_nx.sh
+
+            - uses: actions/upload-artifact@v7
+              with:
+                name: switch
+                path: target/aarch64-nintendo-switch/switch/ruffle4consoles.nro
+        

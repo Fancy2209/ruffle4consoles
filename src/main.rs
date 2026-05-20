@@ -6,42 +6,39 @@ mod custom_event;
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::thread;
 use std::time::Instant;
 
 use anyhow::anyhow;
+
 use ron::de::from_reader;
 use ron::from_str;
-use ruffle_core::backend::navigator::SocketMode;
+
+use ruffle_core::backend::navigator::{NullExecutor, NullNavigatorBackend};
 use ruffle_core::config::Letterbox;
-use ruffle_core::events::{GamepadButton, KeyCode, MouseButton, ParseEnumError};
+use ruffle_core::events::{GamepadButton, MouseButton, KeyCode, TextControlCode, ParseEnumError};
 use ruffle_core::limits::ExecutionLimit;
 use ruffle_core::tag_utils::SwfMovie;
-use ruffle_core::{Player, PlayerBuilder, PlayerEvent, ViewportDimensions};
-use ruffle_frontend_utils::backends::executor::{AsyncExecutor, PollRequester};
-use ruffle_frontend_utils::backends::navigator::ExternalNavigatorBackend;
-use ruffle_frontend_utils::content::PlayingContent;
+use ruffle_core::{PlayerBuilder, PlayerEvent, ViewportDimensions};
+
 use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
-use sdl2::controller::Axis;
-use serde::Deserialize;
-use std::sync::mpsc;
-use std::sync::mpsc::Sender;
-use url::Url;
 
+use serde::Deserialize;
+
+
+use sdl2::controller::Axis;
+
+use backends::ui::SdlUiBackend;
 use backends::audio::SdlAudioBackend;
 use backends::storage::DiskStorageBackend;
-//use backends::log::ConsoleLogBackend;
 
 //#[cfg(any(target_os = "vita", target_os = "horizon"))]
 #[cfg(target_os = "horizon")]
 use core::ffi::c_void;
 
-use crate::backends::navigator::ConsoleNavigatorInterface;
-use crate::custom_event::RuffleEvent;
 
 #[cfg(target_os = "vita")]
 type SceGxmMultisampleMode = u32;
@@ -52,10 +49,6 @@ pub const SCE_GXM_MULTISAMPLE_2X: SceGxmMultisampleMode = 1;
 #[cfg(target_os = "vita")]
 pub const SCE_GXM_MULTISAMPLE_4X: SceGxmMultisampleMode = 2;
 
-//#[cfg(target_os = "vita")]
-//static VGL_MODE_SHADER_PAIR:u32 = 0;
-//#[cfg(target_os = "vita")]
-//static VGL_MODE_GLOBAL:u32 = 1;
 #[cfg(target_os = "vita")]
 static VGL_MODE_POSTPONED: u32 = 2;
 
@@ -88,10 +81,9 @@ unsafe extern "C" {
     pub fn vglSetVertexPoolSize(size: u32);
 }
 
-//#[used]
-//#[unsafe(export_name = "_newlib_heap_size_user")]
-//#[unsafe(link_section = ".data")]
-//pub static _NEWLIB_HEAP_SIZE_USER: u32 = 246 * 1024 * 1024; // 246 MiB
+#[used]
+#[unsafe(export_name = "_newlib_heap_size_user")]
+pub static _NEWLIB_HEAP_SIZE_USER: u32 = 246 * 1024 * 1024; // 246 MiB
 
 #[cfg(target_os = "horizon")]
 unsafe extern "C" {
@@ -146,30 +138,6 @@ pub fn get_default_display_resolution() -> Result<(u32, u32), u32> {
         Err(rc)
     }
 }
-
-struct ActivePlayer {
-    player: Arc<Mutex<Player>>,
-    executor: Arc<AsyncExecutor<EventSender>>,
-}
-
-#[derive(Clone)]
-pub struct EventSender {
-    sender: Sender<RuffleEvent>,
-    //waker: AndroidAppWaker,
-}
-
-impl EventSender {
-    pub fn send(&self, event: RuffleEvent) {
-        let _ = self.sender.send(event);
-    }
-}
-
-impl PollRequester for EventSender {
-    fn request_poll(&self) {
-        self.send(RuffleEvent::TaskPoll);
-    }
-}
-
 pub struct AxisState {
     pub up: bool,
     pub down: bool,
@@ -252,11 +220,10 @@ pub fn main() {
         unsafe {
             let id = vitasdk_sys::sceKernelGetThreadId();
             vitasdk_sys::sceKernelChangeThreadPriority(id, vitasdk_sys::SCE_KERNEL_PROCESS_PRIORITY_USER_HIGH as _);
-            vitasdk_sys::sceKernelChangeThreadCpuAffinityMask(id, vitasdk_sys::SCE_KERNEL_CPU_MASK_USER_1 as _);
+            vitasdk_sys::sceKernelChangeThreadCpuAffinityMask(id, vitasdk_sys::SCE_KERNEL_CPU_MASK_USER_0 as _);
         }
     }
 
-    //println!("{}", _NEWLIB_HEAP_SIZE_USER);
     sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
 
     let mut axis_state = AxisState::default();
@@ -354,10 +321,6 @@ pub fn main() {
         "file:///movie.swf".into()
     };
 
-    #[cfg(not(target_os = "vita"))]
-    let movie_url = Url::parse(&format!("file://{}/{}", BASE_PATH, swf_name)).unwrap();
-    #[cfg(target_os = "vita")]
-    let movie_url = Url::parse(&format!("file:///{}/{}", "data/ruffle", swf_name)).unwrap();
 
     let swf_data = std::fs::read(format!("{}/{}", BASE_PATH, swf_name));
     let movie = SwfMovie::from_data(&swf_data.unwrap(), swf_url.into(), None)
@@ -375,40 +338,29 @@ pub fn main() {
     });
     let renderer = GlowRenderBackend::new(context, false, StageQuality::High).unwrap();
     let audio = SdlAudioBackend::new(sdl2_context.audio().unwrap()).unwrap();
+    let ui_backend = SdlUiBackend::new(Box::new(sdl2_window.clone()));
 
     let storage_path = format!("{}/{}", BASE_PATH, "storage");
     let _ = std::fs::create_dir_all(storage_path.clone());
-    let (sender, receiver) = mpsc::channel::<RuffleEvent>();
-    let sender = EventSender { sender };
-    let (executor, future_spawner) = AsyncExecutor::new(sender.clone());
-    let navigator = ExternalNavigatorBackend::new(
-        movie_url.clone(),
-        future_spawner,
-        true,
-        Default::default(),
-        SocketMode::Allow,
-        Rc::new(PlayingContent::DirectFile(movie_url)),
-        ConsoleNavigatorInterface,
-    );
+    let executor = NullExecutor::new();
+
 
     let player = PlayerBuilder::new()
-        //.with_log(log.clone())
         .with_renderer(renderer)
         .with_audio(audio)
+        .with_ui(ui_backend)
         .with_storage(Box::new(DiskStorageBackend::new(std::path::PathBuf::from(
             storage_path,
         ))))
-        .with_navigator(navigator)
+        .with_navigator(NullNavigatorBackend::with_base_path(BASE_PATH, &executor).unwrap())
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
-        //.with_scale_mode(ruffle_core::StageScaleMode::ShowAll, true)
         .with_fullscreen(true)
         .with_letterbox(Letterbox::Off)
         .with_gamepad_button_mapping(gamepad_button_mapping)
         .with_autoplay(true)
         .build();
-    let playerbox = Some(ActivePlayer { player, executor });
-    let player: &Arc<Mutex<Player>> = &playerbox.as_ref().unwrap().player;
+
     last_frame_time = Instant::now();
     player.lock().unwrap().preload(&mut ExecutionLimit::none());
 
@@ -417,23 +369,16 @@ pub fn main() {
         #[cfg(target_os = "horizon")]
         {
             let (nx_width, nx_height) = sdl2_window.drawable_size();
-            if nx_width != dimensions.width && nx_height != dimensions.height {
+            if nx_width != dimensions.width || nx_height != dimensions.height {
                 dimensions.width = nx_width;
                 dimensions.height = nx_height;
                 player.lock().unwrap().set_viewport_dimensions(dimensions);
             }
         }
-        match receiver.try_recv() {
-            Err(_) => {}
-            Ok(RuffleEvent::TaskPoll) => {
-                if let Some(player) = playerbox.as_ref() {
-                    player.executor.poll_all()
-                }
-            }
-        };
         for event in event_pump.poll_iter() {
             match event {
                 sdl2::event::Event::Quit { .. } => break 'main,
+
                 sdl2::event::Event::Window {
                     win_event: sdl2::event::WindowEvent::Resized(w, h),
                     ..
@@ -444,12 +389,14 @@ pub fn main() {
                         player.lock().unwrap().set_viewport_dimensions(dimensions);
                     }
                 }
+
                 sdl2::event::Event::ControllerDeviceAdded {
                     timestamp: _,
                     which,
                 } => {
                     controllers.push(sdl2_game_controller.open(which).unwrap());
                 }
+
                 sdl2::event::Event::ControllerDeviceRemoved {
                     timestamp: _,
                     which,
@@ -458,6 +405,7 @@ pub fn main() {
                         controllers.remove(pos); // drops the controller -> SDL closes it
                     }
                 }
+
                 sdl2::event::Event::ControllerButtonDown {
                     timestamp: _,
                     which: _,
@@ -473,6 +421,7 @@ pub fn main() {
                             });
                     }
                 }
+
                 sdl2::event::Event::ControllerButtonUp {
                     timestamp: _,
                     which: _,
@@ -488,6 +437,7 @@ pub fn main() {
                             });
                     }
                 }
+
                 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
                 sdl2::event::Event::MouseMotion {
                     timestamp: _,
@@ -504,6 +454,7 @@ pub fn main() {
                             y: y.into(),
                         });
                 }
+
                 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
                 sdl2::event::Event::MouseButtonDown {
                     timestamp: _,
@@ -524,6 +475,7 @@ pub fn main() {
                         });
                     }
                 }
+
                 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
                 sdl2::event::Event::MouseButtonUp {
                     timestamp: _,
@@ -543,6 +495,7 @@ pub fn main() {
                         });
                     }
                 }
+
                 sdl2::event::Event::FingerMotion {
                   timestamp: _,
                   touch_id: _,
@@ -558,6 +511,7 @@ pub fn main() {
                             y: y as f64 * dimensions.height as f64
                         });
                 }
+
                 sdl2::event::Event::FingerDown {
                     timestamp: _,
                     touch_id: _,
@@ -575,6 +529,7 @@ pub fn main() {
                         index: None,
                     });
                 }
+
                 sdl2::event::Event::FingerUp {
                     timestamp: _,
                     touch_id: _,
@@ -591,6 +546,7 @@ pub fn main() {
                         button: MouseButton::Left,
                     });
                 }
+
                 sdl2::event::Event::ControllerAxisMotion {
                     timestamp: _,
                     which: _,
@@ -674,6 +630,26 @@ pub fn main() {
                         player.lock().unwrap().handle_event(event_right);
                     }
                 }
+
+                sdl2::event::Event::TextInput { text, .. } => {
+                    for codepoint in text.chars() {
+                        player
+                            .lock()
+                            .unwrap()
+                            .handle_event(PlayerEvent::TextInput { codepoint });
+                    }
+                }
+
+                sdl2::event::Event::KeyDown { scancode, .. } => {
+                    if scancode == Some(sdl2::keyboard::Scancode::Backspace) {
+                        player
+                            .lock()
+                            .unwrap()
+                            .handle_event(PlayerEvent::TextControl {
+                                code: TextControlCode::Backspace,
+                            });
+                    }
+                }
                 _ => {}
             }
         }
@@ -685,8 +661,8 @@ pub fn main() {
                 player.tick(dt as f64 / 1000.0);
                 if player.needs_render() {
                     player.render();
-                    sdl2_window.gl_swap_window();
                 }
+                sdl2_window.gl_swap_window();
             }
         }
     }

@@ -24,6 +24,7 @@ ron = "0.11.0"
 serde = "1.0.225"
 tracing = { version = "0.1.41", features = ["log"] }
 url = "2.5.7"
+chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
 
 [target.armv7-sony-vita-newlibeabihf.dependencies]
 vitasdk-sys = { version = "0.3.2", features = [

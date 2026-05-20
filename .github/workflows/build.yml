@@ -30,6 +30,7 @@ jobs:
             - uses: actions-rust-lang/setup-rust-toolchain@v1
               with:
                 toolchain: nightly
+                components: rust-src
 
             - name: Build
               run: ./build_nx.sh

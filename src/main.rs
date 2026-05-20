@@ -214,7 +214,8 @@ fn load_config() -> Result<
 }
 
 pub fn main() {
-    if cfg!(target_os = "vita") {
+    #[cfg(target_os = "vita")]
+    {
         unsafe {
             let id = vitasdk_sys::sceKernelGetThreadId();
             vitasdk_sys::sceKernelChangeThreadPriority(id, vitasdk_sys::SCE_KERNEL_PROCESS_PRIORITY_USER_HIGH as _);

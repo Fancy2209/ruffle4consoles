@@ -11,6 +11,9 @@ jobs:
         steps:
             - uses: actions/checkout@v6
 
+            - name: Install Java
+              run: apk add --no-cache openjdk11
+
             - name: Build
               run: ./build_psp2.sh
 
@@ -26,6 +29,9 @@ jobs:
 
         steps:
             - uses: actions/checkout@v6
+
+            - name: Install Java
+              run: sudo apt install openjdk-11-jdk
 
             - uses: actions-rust-lang/setup-rust-toolchain@v1
               with:

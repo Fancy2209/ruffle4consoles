@@ -15,7 +15,7 @@ jobs:
               run: |
                 apk add --no-cache openjdk11 cmake
                 git clone --depth=1 https://github.com/Northfear/SDL/ && cd SDL
-                cmake -S. -Bbuild -DCMAKE_TOOLCHAIN_FILE=${VITASDK}/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DVIDEO_VITA_VGL=ON
+                cmake -S. -Bbuild -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_TOOLCHAIN_FILE=${VITASDK}/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DVIDEO_VITA_VGL=ON
                 cmake --build build --parallel $(nproc)
                 cmake --install build
 

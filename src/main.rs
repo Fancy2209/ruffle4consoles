@@ -350,7 +350,7 @@ pub fn main() {
         .with_storage(Box::new(DiskStorageBackend::new(std::path::PathBuf::from(
             storage_path,
         ))))
-        .with_navigator(NullNavigatorBackend::with_base_path(std::path::PathBuf::from(BASE_PATH), &executor).unwrap())
+        .with_navigator(NullNavigatorBackend::with_base_path(std::path::Path::new(BASE_PATH), &executor).unwrap())
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
         .with_fullscreen(true)

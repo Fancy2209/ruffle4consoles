@@ -76,7 +76,8 @@ unsafe extern "C" {
     pub fn vglSetParamBufferSize(size: u32);
     pub fn vglUseCachedMem(r#use: bool);
     pub fn vglUseTripleBuffering(usage: bool);
-    pub fn vglSetVertexPoolSize(size: u32);
+    
+    //pub fn vglSetVertexPoolSize(size: u32);
 }
 
 #[used]
@@ -238,7 +239,7 @@ pub fn main() {
         vglUseCachedMem(false);
         vglUseTripleBuffering(false);
         vglSetParamBufferSize(4 * 1024 * 1024);
-        vglSetVertexPoolSize(20 * 1024 * 1024);
+        //vglSetVertexPoolSize(20 * 1024 * 1024);
         vglInitWithCustomThreshold(
             0,
             960,

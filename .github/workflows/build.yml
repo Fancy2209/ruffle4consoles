@@ -11,8 +11,13 @@ jobs:
         steps:
             - uses: actions/checkout@v6
 
-            - name: Install Java
-              run: apk add --no-cache openjdk11
+            - name: Install Java and Northfear SDL
+              run: |
+                apk add --no-cache openjdk11 cmake
+                git clone --depth=1 https://github.com/Northfear/SDL/ && cd SDL
+                cmake -S. -Bbuild -DCMAKE_TOOLCHAIN_FILE=${VITASDK}/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DVIDEO_VITA_VGL=ON
+                cmake --build build --parallel $(nproc)
+                cmake --install build
 
             - name: Build
               run: ./build_psp2.sh

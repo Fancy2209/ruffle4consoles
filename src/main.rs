@@ -252,13 +252,10 @@ pub fn main() {
         );
     }
 
-    #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
-    {
-        let gl_attr = sdl2_video.gl_attr();
-        gl_attr.set_context_profile(sdl2::video::GLProfile::GLES);
-        gl_attr.set_context_version(2, 0);
-        let _ = sdl2_video.gl_set_swap_interval(0);
-    }
+    let gl_attr = sdl2_video.gl_attr();
+    gl_attr.set_context_profile(sdl2::video::GLProfile::GLES);
+    gl_attr.set_context_version(2, 0);
+    let _ = sdl2_video.gl_set_swap_interval(0);
 
     let config = match load_config() {
         Ok(x) => x,

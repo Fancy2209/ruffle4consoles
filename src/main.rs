@@ -156,7 +156,7 @@ impl Default for AxisState {
 }
 
 #[cfg(target_os = "vita")]
-const BASE_PATH: &str = "ux0:/data/ruffle";
+const BASE_PATH: &str = "ux0:data/ruffle";
 
 #[cfg(target_os = "horizon")]
 const BASE_PATH: &str = "/switch/ruffle";

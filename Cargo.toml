@@ -48,18 +48,12 @@ debug = true
 inherits = "release"
 opt-level = 3
 strip = "none"
-#debug = false
 lto = false
-codegen-units = 1
-incremental = false
 panic = "abort"
 
 [profile.switch]
 inherits = "release"
 opt-level = 3
-#debug = false
 strip = "none"
 lto = true
-codegen-units = 1
-incremental = false
 panic = "abort"

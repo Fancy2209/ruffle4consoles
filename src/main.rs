@@ -331,7 +331,8 @@ pub fn main() {
     };
 
 
-    let movie = SwfMovie::from_path(std::fs::canonicalize(format!("{}/{}", BASE_PATH, swf_name)).unwrap(), swf_url.into())
+    let swf_data = std::fs::read(format!("{}/{}", BASE_PATH, swf_name));
+    let movie = SwfMovie::from_data(&swf_data.unwrap(), swf_url.into(), None)
         .map_err(|e| anyhow!(e.to_string()));
 
     if movie.is_err() {

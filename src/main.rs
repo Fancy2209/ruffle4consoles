@@ -24,11 +24,11 @@ use ruffle_core::{PlayerBuilder, PlayerEvent, ViewportDimensions};
 use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
 
+use tracing_subscriber::layer::SubscriberExt;
 use serde::Deserialize;
-
-
 use sdl2::controller::Axis;
 
+use backends::log::ConsoleLogBackend;
 use backends::ui::SdlUiBackend;
 use backends::audio::SdlAudioBackend;
 use backends::storage::DiskStorageBackend;
@@ -156,24 +156,26 @@ impl Default for AxisState {
 }
 
 #[cfg(target_os = "vita")]
-const BASE_PATH: &str = "ux0:data/ruffle";
+const BASE_PATH: &str = "ux0:/data/ruffle";
 
 #[cfg(target_os = "horizon")]
 const BASE_PATH: &str = "/switch/ruffle";
 
 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
-const BASE_PATH: &str = "/home/paulo/Repos/ruffle4consoles/ruffle";
+const BASE_PATH: &str = "./ruffle";
 
 const CONFIG: &str = "
 Config(
     gamepad_config: {},
 )";
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Debug, Deserialize)]
 struct Config {
     gamepad_config: HashMap<String, u32>,
     swf_url: Option<String>,
     swf_name: Option<String>,
+    letterbox: Option<String>
 }
 
 fn load_config() -> Result<
@@ -181,10 +183,16 @@ fn load_config() -> Result<
         HashMap<GamepadButton, KeyCode>,
         Option<String>,
         Option<String>,
+        Letterbox
     ),
     ParseEnumError,
 > {
-    let config_file = format!("{}/config.ron", BASE_PATH);
+    tracing_subscriber::registry()
+    .with(tracing_subscriber::EnvFilter::builder().parse_lossy("info,ruffle=info,avm_trace=info"))
+    .with(tracing_subscriber::fmt::layer())
+    .init();
+
+    let config_file = format!("{}/config.ron", std::fs::canonicalize(BASE_PATH).unwrap().into_os_string().into_string().unwrap());
     let config_file_clone = config_file.clone();
     let f = File::open(config_file);
     if f.is_ok() {
@@ -201,7 +209,7 @@ fn load_config() -> Result<
             gamepad_button_mapping
                 .insert(GamepadButton::from_str(&button)?, KeyCode::from_code(key));
         }
-        Ok((gamepad_button_mapping, config.swf_name, config.swf_url))
+        Ok((gamepad_button_mapping, config.swf_name, config.swf_url, Letterbox::from_str(&config.letterbox.unwrap_or("on".to_string())).unwrap_or(Letterbox::On)))
     } else {
         println!("Couldn't load config file:{}", config_file_clone);
         let config: Config = from_str(CONFIG).unwrap();
@@ -210,11 +218,12 @@ fn load_config() -> Result<
             gamepad_button_mapping
                 .insert(GamepadButton::from_str(&button)?, KeyCode::from_code(key));
         }
-        Ok((gamepad_button_mapping, config.swf_name, config.swf_url))
+        Ok((gamepad_button_mapping, config.swf_name, config.swf_url, Letterbox::from_str(&config.letterbox.unwrap_or("on".to_string())).unwrap_or(Letterbox::On)))
     }
 }
 
 pub fn main() {
+    unsafe { std::env::set_var("RUST_BACKTRACE", "1");}
     #[cfg(target_os = "vita")]
     {
         unsafe {
@@ -265,7 +274,7 @@ pub fn main() {
         }
     };
 
-    let (gamepad_button_mapping, swf_name, swf_url) = config;
+    let (gamepad_button_mapping, swf_name, swf_url, letterbox_config) = config;
 
     let mut controllers: Vec<sdl2::controller::GameController> = Vec::new();
     for i in 0..sdl2_joystick.num_joysticks().unwrap() {
@@ -322,15 +331,13 @@ pub fn main() {
     };
 
 
-    let swf_data = std::fs::read(format!("{}/{}", BASE_PATH, swf_name));
-    let movie = SwfMovie::from_data(&swf_data.unwrap(), swf_url.into(), None)
+    let movie = SwfMovie::from_path(std::fs::canonicalize(format!("{}/{}", BASE_PATH, swf_name)).unwrap(), swf_url.into())
         .map_err(|e| anyhow!(e.to_string()));
 
     if movie.is_err() {
         println!("Couldn't load {}", format!("{}/{}", BASE_PATH, swf_name));
         std::process::exit(1);
     }
-    //let log = ConsoleLogBackend::default();
 
     // Glow can only realistically be used in vita and horizon, need
     let context = Arc::new(unsafe {
@@ -342,7 +349,7 @@ pub fn main() {
 
     let storage_path = format!("{}/{}", BASE_PATH, "storage");
     let _ = std::fs::create_dir_all(storage_path.clone());
-    let executor = NullExecutor::new();
+    let mut executor = NullExecutor::new();
 
 
     let player = PlayerBuilder::new()
@@ -356,9 +363,11 @@ pub fn main() {
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
         .with_fullscreen(true)
-        .with_letterbox(Letterbox::Off)
+        .with_letterbox(letterbox_config)
+        .with_player_runtime(ruffle_core::PlayerRuntime::AIR)
         .with_gamepad_button_mapping(gamepad_button_mapping)
         .with_autoplay(true)
+        .with_log(ConsoleLogBackend::default())
         .build();
 
     last_frame_time = Instant::now();
@@ -655,14 +664,15 @@ pub fn main() {
         }
         let new_time = Instant::now();
         let dt = new_time.duration_since(last_frame_time).as_micros();
+        executor.run();
         if dt > 0 {
             last_frame_time = new_time;
             if let Ok(mut player) = player.lock() {
                 player.tick(dt as f64 / 1000.0);
                 if player.needs_render() {
                     player.render();
+                    sdl2_window.gl_swap_window();
                 }
-                sdl2_window.gl_swap_window();
             }
         }
     }

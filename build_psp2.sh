@@ -7,5 +7,5 @@
 #export RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,--wrap=memcpy"
 #export RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,--wrap=memset"
 #export RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,-q"
-export RUSTFLAGS="$RUSTFLAGS -Zthreads=$(nproc) -C target-cpu=cortex-a9"
+export RUSTFLAGS="$RUSTFLAGS -C target-cpu=cortex-a9"
 cargo vita build vpk --profile=vita

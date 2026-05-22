@@ -355,7 +355,6 @@ pub fn main() {
 
     let player = PlayerBuilder::new()
         .with_renderer(renderer)
-        .with_audio(audio)
         .with_ui(ui_backend)
         .with_storage(Box::new(DiskStorageBackend::new(std::path::PathBuf::from(
             storage_path,

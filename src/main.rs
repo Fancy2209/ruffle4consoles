@@ -75,8 +75,6 @@ unsafe extern "C" {
     pub fn vglSetParamBufferSize(size: u32);
     pub fn vglUseCachedMem(r#use: bool);
     pub fn vglUseTripleBuffering(usage: bool);
-
-    //pub fn vglSetVertexPoolSize(size: u32);
 }
 
 #[used]
@@ -240,7 +238,22 @@ fn load_config() -> Result<
     }
 }
 
+#[cfg(not(target_os = "vita"))]
 pub fn main() {
+    main_func();
+}
+
+#[cfg(target_os = "vita")]
+pub fn main() {
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024) // 8 MiB
+        .spawn(move || main_func())
+        .expect("Unable to spawn thread")
+        .join()
+        .expect("Unable to join thread");
+}
+
+pub fn main_func() {
     unsafe {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
@@ -254,7 +267,7 @@ pub fn main() {
             );
             vitasdk_sys::sceKernelChangeThreadCpuAffinityMask(
                 id,
-                vitasdk_sys::SCE_KERNEL_CPU_MASK_USER_0 as _,
+                vitasdk_sys::SCE_KERNEL_CPU_MASK_USER_1 as _,
             );
         }
     }

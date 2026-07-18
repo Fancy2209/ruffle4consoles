@@ -37,6 +37,11 @@ jobs:
                 name: vita
                 path: target/armv7-sony-vita-newlibeabihf/vita/ruffle4consoles.vpk
 
+            - uses: actions/upload-artifact@v7
+              with:
+                name: vita-self
+                path: target/armv7-sony-vita-newlibeabihf/vita/ruffle4consoles.self
+
     build-nx:
         name: Nintendo Switch
         runs-on: ubuntu-latest

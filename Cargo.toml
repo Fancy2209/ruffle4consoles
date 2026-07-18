@@ -36,6 +36,7 @@ vitasdk-sys = { version = "0.3.2", features = [
 [package.metadata.vita]
 title_id = "RUFFLVITA"
 title_name = "Ruffle"
+assets = "./static/vita"
 build_std = "std,panic_abort"
 
 [package.metadata.vita.profile.vita]

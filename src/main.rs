@@ -246,7 +246,7 @@ pub fn main() {
 #[cfg(target_os = "vita")]
 pub fn main() {
     std::thread::Builder::new()
-        .stack_size(8 * 1024 * 1024) // 8 MiB
+        .stack_size(32 * 1024 * 1024) // 8 MiB
         .spawn(move || main_func())
         .expect("Unable to spawn thread")
         .join()

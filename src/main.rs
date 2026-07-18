@@ -6,7 +6,7 @@ mod backends;
 use std::collections::HashMap;
 use std::fs::File;
 use std::str::FromStr;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
@@ -16,7 +16,7 @@ use ron::from_str;
 
 use ruffle_core::backend::navigator::{NullExecutor, NullNavigatorBackend};
 use ruffle_core::config::Letterbox;
-use ruffle_core::events::{GamepadButton, MouseButton, KeyCode, TextControlCode, ParseEnumError};
+use ruffle_core::events::{GamepadButton, KeyCode, MouseButton, ParseEnumError, TextControlCode};
 use ruffle_core::limits::ExecutionLimit;
 use ruffle_core::tag_utils::SwfMovie;
 use ruffle_core::{PlayerBuilder, PlayerEvent, ViewportDimensions};
@@ -24,19 +24,18 @@ use ruffle_core::{PlayerBuilder, PlayerEvent, ViewportDimensions};
 use ruffle_render::quality::StageQuality;
 use ruffle_render_glow::GlowRenderBackend;
 
-use tracing_subscriber::layer::SubscriberExt;
-use serde::Deserialize;
 use sdl2::controller::Axis;
+use serde::Deserialize;
+use tracing_subscriber::layer::SubscriberExt;
 
-use backends::log::ConsoleLogBackend;
-use backends::ui::SdlUiBackend;
 use backends::audio::SdlAudioBackend;
+use backends::log::ConsoleLogBackend;
 use backends::storage::DiskStorageBackend;
+use backends::ui::SdlUiBackend;
 
 //#[cfg(any(target_os = "vita", target_os = "horizon"))]
 #[cfg(target_os = "horizon")]
 use core::ffi::c_void;
-
 
 #[cfg(target_os = "vita")]
 type SceGxmMultisampleMode = u32;
@@ -76,7 +75,7 @@ unsafe extern "C" {
     pub fn vglSetParamBufferSize(size: u32);
     pub fn vglUseCachedMem(r#use: bool);
     pub fn vglUseTripleBuffering(usage: bool);
-    
+
     //pub fn vglSetVertexPoolSize(size: u32);
 }
 
@@ -96,8 +95,6 @@ static _SC_PAGESIZE: i32 = 30;
 static _SC_HOST_NAME_MAX: u32 = 33;
 #[cfg(target_os = "horizon")]
 static GRND_RANDOM: u32 = 0x2;
-
-
 
 #[cfg(target_os = "horizon")]
 #[unsafe(no_mangle)]
@@ -175,7 +172,7 @@ struct Config {
     gamepad_config: HashMap<String, u32>,
     swf_url: Option<String>,
     swf_name: Option<String>,
-    letterbox: Option<String>
+    letterbox: Option<String>,
 }
 
 fn load_config() -> Result<
@@ -183,16 +180,25 @@ fn load_config() -> Result<
         HashMap<GamepadButton, KeyCode>,
         Option<String>,
         Option<String>,
-        Letterbox
+        Letterbox,
     ),
     ParseEnumError,
 > {
     tracing_subscriber::registry()
-    .with(tracing_subscriber::EnvFilter::builder().parse_lossy("info,ruffle=info,avm_trace=info"))
-    .with(tracing_subscriber::fmt::layer())
-    .init();
+        .with(
+            tracing_subscriber::EnvFilter::builder().parse_lossy("info,ruffle=info,avm_trace=info"),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
-    let config_file = format!("{}/config.ron", std::fs::canonicalize(BASE_PATH).unwrap().into_os_string().into_string().unwrap());
+    let config_file = format!(
+        "{}/config.ron",
+        std::fs::canonicalize(BASE_PATH)
+            .unwrap()
+            .into_os_string()
+            .into_string()
+            .unwrap()
+    );
     let config_file_clone = config_file.clone();
     let f = File::open(config_file);
     if f.is_ok() {
@@ -209,7 +215,13 @@ fn load_config() -> Result<
             gamepad_button_mapping
                 .insert(GamepadButton::from_str(&button)?, KeyCode::from_code(key));
         }
-        Ok((gamepad_button_mapping, config.swf_name, config.swf_url, Letterbox::from_str(&config.letterbox.unwrap_or("on".to_string())).unwrap_or(Letterbox::On)))
+        Ok((
+            gamepad_button_mapping,
+            config.swf_name,
+            config.swf_url,
+            Letterbox::from_str(&config.letterbox.unwrap_or("on".to_string()))
+                .unwrap_or(Letterbox::On),
+        ))
     } else {
         println!("Couldn't load config file:{}", config_file_clone);
         let config: Config = from_str(CONFIG).unwrap();
@@ -218,18 +230,32 @@ fn load_config() -> Result<
             gamepad_button_mapping
                 .insert(GamepadButton::from_str(&button)?, KeyCode::from_code(key));
         }
-        Ok((gamepad_button_mapping, config.swf_name, config.swf_url, Letterbox::from_str(&config.letterbox.unwrap_or("on".to_string())).unwrap_or(Letterbox::On)))
+        Ok((
+            gamepad_button_mapping,
+            config.swf_name,
+            config.swf_url,
+            Letterbox::from_str(&config.letterbox.unwrap_or("on".to_string()))
+                .unwrap_or(Letterbox::On),
+        ))
     }
 }
 
 pub fn main() {
-    unsafe { std::env::set_var("RUST_BACKTRACE", "1");}
+    unsafe {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
     #[cfg(target_os = "vita")]
     {
         unsafe {
             let id = vitasdk_sys::sceKernelGetThreadId();
-            vitasdk_sys::sceKernelChangeThreadPriority(id, vitasdk_sys::SCE_KERNEL_PROCESS_PRIORITY_USER_HIGH as _);
-            vitasdk_sys::sceKernelChangeThreadCpuAffinityMask(id, vitasdk_sys::SCE_KERNEL_CPU_MASK_USER_0 as _);
+            vitasdk_sys::sceKernelChangeThreadPriority(
+                id,
+                vitasdk_sys::SCE_KERNEL_PROCESS_PRIORITY_USER_HIGH as _,
+            );
+            vitasdk_sys::sceKernelChangeThreadCpuAffinityMask(
+                id,
+                vitasdk_sys::SCE_KERNEL_CPU_MASK_USER_0 as _,
+            );
         }
     }
 
@@ -330,7 +356,6 @@ pub fn main() {
         "file:///movie.swf".into()
     };
 
-
     let swf_data = std::fs::read(format!("{}/{}", BASE_PATH, swf_name));
     let movie = SwfMovie::from_data(&swf_data.unwrap(), swf_url.into(), None)
         .map_err(|e| anyhow!(e.to_string()));
@@ -352,14 +377,19 @@ pub fn main() {
     let _ = std::fs::create_dir_all(storage_path.clone());
     let mut executor = NullExecutor::new();
 
+    #[cfg(not(target_os = "vita"))]
+    let executor_base_path = std::path::Path::new(BASE_PATH);
+    #[cfg(target_os = "vita")]
+    let executor_base_path = std::path::Path::new("/"); // Just use app0
 
     let player = PlayerBuilder::new()
         .with_renderer(renderer)
+        .with_audio(audio)
         .with_ui(ui_backend)
         .with_storage(Box::new(DiskStorageBackend::new(std::path::PathBuf::from(
             storage_path,
         ))))
-        .with_navigator(NullNavigatorBackend::with_base_path(std::path::Path::new(BASE_PATH), &executor).unwrap())
+        .with_navigator(NullNavigatorBackend::with_base_path(executor_base_path, &executor).unwrap())
         .with_movie(movie.unwrap())
         .with_viewport_dimensions(dimensions.width, dimensions.height, dimensions.scale_factor)
         .with_fullscreen(true)
@@ -456,12 +486,12 @@ pub fn main() {
                     x,
                     y,
                     xrel: _,
-                    yrel: _
+                    yrel: _,
                 } => {
-                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
-                            x: x.into(),
-                            y: y.into(),
-                        });
+                    player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
+                        x: x.into(),
+                        y: y.into(),
+                    });
                 }
 
                 #[cfg(not(any(target_os = "horizon", target_os = "vita")))]
@@ -506,19 +536,19 @@ pub fn main() {
                 }
 
                 sdl2::event::Event::FingerMotion {
-                  timestamp: _,
-                  touch_id: _,
-                  finger_id: _,
-                  x,
-                  y,
-                  dx: _,
-                  dy: _,
-                  pressure: _
+                    timestamp: _,
+                    touch_id: _,
+                    finger_id: _,
+                    x,
+                    y,
+                    dx: _,
+                    dy: _,
+                    pressure: _,
                 } => {
-                     player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
-                            x: x as f64 * dimensions.width as f64,
-                            y: y as f64 * dimensions.height as f64
-                        });
+                    player.lock().unwrap().handle_event(PlayerEvent::MouseMove {
+                        x: x as f64 * dimensions.width as f64,
+                        y: y as f64 * dimensions.height as f64,
+                    });
                 }
 
                 sdl2::event::Event::FingerDown {

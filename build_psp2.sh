@@ -8,4 +8,4 @@
 #export RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,--wrap=memset"
 #export RUSTFLAGS="$RUSTFLAGS -Clink-arg=-Wl,-q"
 export RUSTFLAGS="$RUSTFLAGS -C target-cpu=cortex-a9"
-cargo vita build vpk --profile=vita
+cargo +nightly vita build vpk --profile=vita

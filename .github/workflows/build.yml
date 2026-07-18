@@ -11,6 +11,14 @@ jobs:
         steps:
             - uses: actions/checkout@v6
 
+            - name: Install Java and Northfear SDL
+              run: |
+                apk add --no-cache openjdk11 cmake samurai
+                git clone --depth=1 https://github.com/Northfear/SDL/ && cd SDL
+                cmake -S. -Bbuild -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_TOOLCHAIN_FILE=${VITASDK}/share/vita.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DVIDEO_VITA_VGL=ON -G Ninja
+                cmake --build build --parallel $(nproc)
+                cmake --install build
+                
             - name: Install vitaGL
               run: |
                 git clone --depth=1 https://github.com/Rinnegatamante/vitaShaRK
@@ -19,7 +27,7 @@ jobs:
                 cd ..
                 git clone --depth=1 https://github.com/Rinnegatamante/vitaGL
                 cd vitaGL
-                make PRIMITIVES_SPEEDHACK=1 USE_SCRATCH_MEMORY=1 HAVE_CUSTOM_HEAP=1 HAVE_PTHREAD=1 LOG_ERRORS=1 install -j$(nproc)
+                make PRIMITIVES_SPEEDHACK=0 USE_SCRATCH_MEMORY=1 HAVE_CUSTOM_HEAP=1 HAVE_PTHREAD=1 LOG_ERRORS=1 install -j$(nproc)
      
             - name: Build
               run: ./build_psp2.sh
